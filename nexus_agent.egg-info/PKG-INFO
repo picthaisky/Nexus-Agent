@@ -1,0 +1,14 @@
+Metadata-Version: 2.4
+Name: nexus-agent
+Version: 0.1.0
+Summary: ระบบ Multi-AI Agent อัจฉริยะแบบทำงานต่อเนื่องและแดชบอร์ดการตรวจสอบสำหรับการบริหารจัดการโครงการพัฒนาระบบครบวงจร
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: pydantic<3.0,>=2.0
+Requires-Dist: python-dateutil>=2.8
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0; extra == "dev"
+Requires-Dist: pytest-cov>=4.0; extra == "dev"
+
+# Nexus-Agent
+ระบบ Multi-AI Agent อัจฉริยะแบบทำงานต่อเนื่องและแดชบอร์ดการตรวจสอบสำหรับการบริหารจัดการโครงการพัฒนาระบบครบวงจร
