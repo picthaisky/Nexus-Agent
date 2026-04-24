@@ -93,8 +93,7 @@ class TechnicalArchitectAgent(BaseAgent):
                 f"failure_modes={len(plan.failure_modes)})"
             )
 
-        output_path: str | None = payload.get("output_path")
-        if output_path:
+        if output_path := payload.get("output_path"):
             self._write_todo_md(plan, output_path)
 
         return plan
