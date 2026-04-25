@@ -1,0 +1,109 @@
+# ============================================================
+# Nexus-Agent — Docker Compose / Portainer Stack
+# ============================================================
+# Usage:
+#   docker compose --env-file Stack.env up -d
+#
+# Portainer Stack:
+#   Upload this file + Stack.env to Portainer → Stacks → Add Stack
+# ============================================================
+
+services:
+  # ── Nexus-Agent Application ──────────────────────────────────
+  nexus-agent:
+    image: ghcr.io/picthaisky/nexus-agent:${NEXUS_IMAGE_TAG:-latest}
+    container_name: nexus-agent-app
+    restart: unless-stopped
+    ports:
+      - "${NEXUS_PORT:-8080}:8080"
+    env_file:
+      - Stack.env
+    environment:
+      - ENVIRONMENT=${ENVIRONMENT:-production}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - REDIS_URL=redis://nexus-redis:6379/0
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-nexus}:${POSTGRES_PASSWORD:-nexus_secret}@nexus-postgres:5432/${POSTGRES_DB:-nexus_agent}
+    depends_on:
+      nexus-redis:
+        condition: service_healthy
+      nexus-postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    networks:
+      - nexus-network
+    volumes:
+      - nexus-data:/app/data
+    labels:
+      - "com.nexus-agent.service=app"
+      - "com.nexus-agent.version=${NEXUS_IMAGE_TAG:-latest}"
+
+  # ── Redis (Cache / Memory Store) ─────────────────────────────
+  nexus-redis:
+    image: redis:7-alpine
+    container_name: nexus-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --maxmemory ${REDIS_MAX_MEMORY:-256mb}
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+      --requirepass ${REDIS_PASSWORD:-nexus_redis_secret}
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-nexus_redis_secret}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - nexus-network
+    volumes:
+      - redis-data:/data
+    labels:
+      - "com.nexus-agent.service=redis"
+
+  # ── PostgreSQL (Persistent Storage) ──────────────────────────
+  nexus-postgres:
+    image: postgres:16-alpine
+    container_name: nexus-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-nexus}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nexus_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-nexus_agent}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nexus} -d ${POSTGRES_DB:-nexus_agent}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - nexus-network
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    labels:
+      - "com.nexus-agent.service=postgres"
+
+# ── Networks ─────────────────────────────────────────────────
+networks:
+  nexus-network:
+    driver: bridge
+    name: nexus-network
+
+# ── Volumes ──────────────────────────────────────────────────
+volumes:
+  nexus-data:
+    name: nexus-agent-data
+  redis-data:
+    name: nexus-redis-data
+  postgres-data:
+    name: nexus-postgres-data

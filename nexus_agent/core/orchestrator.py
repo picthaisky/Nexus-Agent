@@ -45,6 +45,11 @@ class Orchestrator:
         self.architect = TechnicalArchitectAgent()
         self.developer = DeveloperAgent()
         self.optimizer = AutonomousOptimizerAgent()
+        
+        from nexus_agent.core.intent_parser import IntentParser, ComplexityAnalyzer
+        self.intent_parser = IntentParser()
+        self.complexity_analyzer = ComplexityAnalyzer()
+        
         self._message_log: list[AgentMessage] = []
 
     # ------------------------------------------------------------------
