@@ -1,0 +1,56 @@
+# ── Git ──────────────────────────────────────────────────────
+.git/
+.gitignore
+
+# ── Python ───────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# ── Virtual Environments ────────────────────────────────────
+.venv/
+venv/
+env/
+
+# ── Testing / Coverage ──────────────────────────────────────
+tests/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ── IDE / Editor ────────────────────────────────────────────
+.idea/
+.vscode/
+.gemini/
+*.swp
+*.swo
+*~
+
+# ── Type Checking ───────────────────────────────────────────
+.mypy_cache/
+.dmypy.json
+
+# ── Documentation ───────────────────────────────────────────
+docs/
+*.md
+!README.md
+
+# ── Environment / Secrets ───────────────────────────────────
+.env
+*.env
+Stack.env
+
+# ── OS Files ────────────────────────────────────────────────
+Thumbs.db
+.DS_Store
+
+# ── Docker ──────────────────────────────────────────────────
+Dockerfile
+docker-compose*.yml
