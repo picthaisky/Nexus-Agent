@@ -22,8 +22,7 @@ COPY requirements.txt .
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
-    pip install --no-cache-dir -r requirements.txt && \
-    pip install --no-cache-dir fastapi uvicorn[standard] httpx
+    pip install --no-cache-dir -r requirements.txt
 
 # ── Stage 2: Production ─────────────────────────────────────
 FROM python:3.10-slim AS production
@@ -54,8 +53,8 @@ COPY pyproject.toml .
 COPY requirements.txt .
 COPY nexus_agent/ ./nexus_agent/
 
-# Install the package itself
-RUN pip install --no-cache-dir -e .
+# Install the package itself (non-editable for production)
+RUN pip install --no-cache-dir .
 
 # Set ownership
 RUN chown -R nexus:nexus /app
