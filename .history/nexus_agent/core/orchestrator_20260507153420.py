@@ -215,25 +215,6 @@ class Orchestrator:
             default_tags=default_tags,
         )
 
-    def import_skill_library_from_github(
-        self,
-        repo_url: str,
-        branch: str = "main",
-        source: str = "awesome-codex-skills",
-        default_tags: list[str] | None = None,
-        cache_dir: str | None = None,
-        shallow_clone: bool = True,
-    ) -> dict[str, Any]:
-        """Import markdown skills from a GitHub repository into persistent vault."""
-        return self.skill_vault.import_skills_from_github(
-            repo_url=repo_url,
-            branch=branch,
-            source=source,
-            default_tags=default_tags,
-            cache_dir=cache_dir,
-            shallow_clone=shallow_clone,
-        )
-
     def search_skills(self, query: str, tags: list[str] | None = None, top_k: int = 10) -> list[dict[str, Any]]:
         """Search for relevant skills in the persistent vault."""
         return self.skill_vault.search_skills(query=query, tags=tags, top_k=top_k)

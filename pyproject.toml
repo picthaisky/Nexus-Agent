@@ -12,6 +12,8 @@ dependencies = [
     "pydantic>=2.0,<3.0",
     "python-dateutil>=2.8",
     "openai>=1.0.0",
+    "langgraph>=0.0.27",
+    "langchain-core>=0.1.30",
 ]
 
 [project.optional-dependencies]

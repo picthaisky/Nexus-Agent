@@ -97,15 +97,6 @@ class SkillImportRequest(BaseModel):
     default_tags: list[str] = Field(default_factory=list)
 
 
-class SkillImportGitHubRequest(BaseModel):
-    repo_url: str
-    branch: str = "main"
-    source: str = "awesome-codex-skills"
-    default_tags: list[str] = Field(default_factory=list)
-    cache_dir: str | None = None
-    shallow_clone: bool = True
-
-
 class SkillSearchRequest(BaseModel):
     query: str
     tags: list[str] = Field(default_factory=list)
@@ -229,7 +220,6 @@ async def root():
             "info": "/info",
             "kg_build": "/kg/build",
             "skills_search": "/skills/search",
-            "skills_import_github": "/skills/import-github",
             "docs": "/docs" if ENVIRONMENT != "production" else "disabled",
         },
     }
@@ -349,22 +339,6 @@ async def skills_import(request: SkillImportRequest):
             directory=request.directory,
             source=request.source,
             default_tags=request.default_tags,
-        )
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@app.post("/skills/import-github", tags=["skills"])
-async def skills_import_github(request: SkillImportGitHubRequest):
-    """Imports markdown skill library from GitHub or a local git directory."""
-    try:
-        return skill_vault.import_skills_from_github(
-            repo_url=request.repo_url,
-            branch=request.branch,
-            source=request.source,
-            default_tags=request.default_tags,
-            cache_dir=request.cache_dir,
-            shallow_clone=request.shallow_clone,
         )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
