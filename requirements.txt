@@ -21,7 +21,7 @@ pybreaker>=1.0.2
 # ── Data & cache ────────────────────────────────────────────────────────────
 sqlalchemy>=2.0
 alembic>=1.13
-psycopg[binary]>=3.1
+psycopg[binary]>=3.3.4
 redis>=5.0
 
 # ── Observability ───────────────────────────────────────────────────────────
