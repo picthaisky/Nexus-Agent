@@ -1,0 +1,95 @@
+"""Reliability helpers — retry + circuit breaker for outbound calls.
+
+Wraps any callable (typically an LLM adapter call) with:
+
+* ``tenacity`` exponential-backoff retries for transient errors.
+* ``pybreaker`` circuit-breaker that trips after N consecutive failures and
+  blocks calls for a configurable cool-down before half-opening.
+
+Each named "service" gets its own breaker so that an outage in (say) Gemini
+does not affect OpenAI.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Callable, TypeVar
+
+import pybreaker
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+    wait_random,
+)
+
+from nexus_agent.core.settings import get_settings
+
+logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
+
+_breakers: dict[str, pybreaker.CircuitBreaker] = {}
+
+
+class TransientError(Exception):
+    """Raised by adapters to opt-in to retries."""
+
+
+def _retryable(exc: BaseException) -> bool:
+    if isinstance(exc, TransientError):
+        return True
+    name = exc.__class__.__name__.lower()
+    return any(token in name for token in ("timeout", "connection", "rate", "temporary"))
+
+
+def get_breaker(name: str) -> pybreaker.CircuitBreaker:
+    """Return (and lazily create) a circuit breaker for ``name``."""
+
+    if name not in _breakers:
+        settings = get_settings()
+        _breakers[name] = pybreaker.CircuitBreaker(
+            fail_max=settings.circuit_breaker_threshold,
+            reset_timeout=settings.circuit_breaker_reset_seconds,
+            name=name,
+        )
+    return _breakers[name]
+
+
+def resilient_call(
+    service: str,
+    func: Callable[..., T],
+    /,
+    *args,
+    **kwargs,
+) -> T:
+    """Invoke ``func`` with retries + per-service circuit breaker."""
+
+    settings = get_settings()
+    breaker = get_breaker(service)
+
+    @retry(
+        reraise=True,
+        retry=retry_if_exception_type(Exception) & retry_if_exception_type(  # noqa: W504
+            (TransientError, TimeoutError, ConnectionError, OSError)
+        ),
+        stop=stop_after_attempt(max(1, settings.inference_max_retries)),
+        wait=wait_exponential(multiplier=1, min=1, max=10) + wait_random(0, 1),
+    )
+    def _attempt() -> T:
+        try:
+            return breaker.call(func, *args, **kwargs)
+        except pybreaker.CircuitBreakerError:
+            logger.warning("circuit_open", extra={"service": service})
+            raise
+        except Exception as exc:
+            if _retryable(exc):
+                logger.info(
+                    "retryable_error",
+                    extra={"service": service, "error": exc.__class__.__name__},
+                )
+                raise TransientError(str(exc)) from exc
+            raise
+
+    return _attempt()

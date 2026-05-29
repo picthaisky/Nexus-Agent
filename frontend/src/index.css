@@ -1,0 +1,9 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root { height: 100%; }
+body {
+  background: radial-gradient(ellipse at top, #101a2e 0%, #050811 60%, #02040a 100%);
+  font-family: ui-sans-serif, system-ui, "Segoe UI", "Noto Sans Thai", sans-serif;
+}
