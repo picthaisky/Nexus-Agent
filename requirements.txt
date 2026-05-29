@@ -19,7 +19,7 @@ tenacity>=8.2.3
 pybreaker>=1.0.2
 
 # ── Data & cache ────────────────────────────────────────────────────────────
-sqlalchemy>=2.0
+sqlalchemy>=2.0.50
 alembic>=1.13
 psycopg[binary]>=3.1
 redis>=5.0
