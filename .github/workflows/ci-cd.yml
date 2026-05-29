@@ -171,7 +171,7 @@ jobs:
 
       - name: 🏷️ Extract metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ needs.prepare.outputs.backend_image }}
           tags: |
@@ -232,7 +232,7 @@ jobs:
 
       - name: 🏷️ Extract metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ needs.prepare.outputs.frontend_image }}
           tags: |
