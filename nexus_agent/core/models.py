@@ -11,9 +11,21 @@ from pydantic import BaseModel, Field
 
 
 class AgentRole(str, Enum):
+    """All agent roles known to the orchestrator and the dashboard.
+
+    The first three are the modern role-based pipeline (architect → developer →
+    optimizer). The remaining four are control-loop / dashboard agents used by
+    the LangGraph workflow and the Cyber-Thai Command Center.
+    """
+
     TECHNICAL_ARCHITECT = "technical_architect"
     DEVELOPER = "developer"
     AUTONOMOUS_OPTIMIZER = "autonomous_optimizer"
+    PLANNER = "planner"
+    EXECUTOR = "executor"
+    VALIDATOR = "validator"
+    UI_WEAVER = "ui_weaver"
+    LEARNER = "learner"
 
 
 class TaskStatus(str, Enum):

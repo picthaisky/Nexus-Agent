@@ -1,14 +1,15 @@
 # ============================================================
 # Nexus-Agent — CI/CD Pipeline
 # ============================================================
-# Workflow: Test → Build & Push → Deploy to Portainer
+# Pipeline: test (backend + frontend) → build & push (backend + frontend)
+#           → deploy to Portainer → notify
 #
 # Required GitHub Secrets:
 #   PORTAINER_WEBHOOK_URL  — Portainer Stack webhook for auto-redeploy
 #
-# Required GitHub Variables (optional):
-#   REGISTRY             — Container registry (default: ghcr.io)
-#   IMAGE_NAME           — Image name (default: repo owner/name)
+# Optional GitHub Variables:
+#   PORTAINER_URL          — environment URL shown in deployment record
+#   DEPLOY_URL             — public base URL used for /health probe
 # ============================================================
 
 name: CI/CD — Build & Deploy to Portainer
@@ -37,18 +38,35 @@ permissions:
 # ── Environment Variables ────────────────────────────────────
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
   PYTHON_VERSION: "3.10"
+  NODE_VERSION: "20"
 
 # ============================================================
 # Jobs
 # ============================================================
 jobs:
   # ────────────────────────────────────────────────────────────
-  # Job 1: Lint & Test
+  # Job 0: Image name normalization (ghcr requires lowercase)
   # ────────────────────────────────────────────────────────────
-  test:
-    name: 🧪 Lint & Test
+  prepare:
+    name: 🧭 Prepare
+    runs-on: ubuntu-latest
+    outputs:
+      backend_image: ${{ steps.names.outputs.backend }}
+      frontend_image: ${{ steps.names.outputs.frontend }}
+    steps:
+      - name: 🔡 Lowercase image names
+        id: names
+        run: |
+          OWNER="${GITHUB_REPOSITORY,,}"
+          echo "backend=${OWNER}"           >> "$GITHUB_OUTPUT"
+          echo "frontend=${OWNER}-frontend" >> "$GITHUB_OUTPUT"
+
+  # ────────────────────────────────────────────────────────────
+  # Job 1a: Backend — Lint & Test
+  # ────────────────────────────────────────────────────────────
+  test-backend:
+    name: 🧪 Backend · Lint & Test
     runs-on: ubuntu-latest
     steps:
       - name: 📥 Checkout code
@@ -66,13 +84,13 @@ jobs:
           pip install -r requirements.txt
           pip install -e ".[dev]"
 
-      - name: 🔍 Lint with ruff (if available)
+      - name: 🔍 Lint with ruff
         continue-on-error: true
         run: |
           pip install ruff
           ruff check nexus_agent/ --output-format=github
 
-      - name: 🧪 Run tests with pytest
+      - name: 🧪 Run pytest
         run: |
           pytest tests/ \
             -v \
@@ -82,23 +100,57 @@ jobs:
             --cov-report=xml:coverage.xml \
             --cov-report=term-missing
 
-      - name: 📊 Upload test results
+      - name: 📊 Upload backend test artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results
+          name: backend-test-results
           path: |
             test-results.xml
             coverage.xml
           retention-days: 30
 
   # ────────────────────────────────────────────────────────────
-  # Job 2: Build & Push Docker Image
+  # Job 1b: Frontend — Type-check & Build
   # ────────────────────────────────────────────────────────────
-  build:
-    name: 🐳 Build & Push
+  test-frontend:
+    name: 🎨 Frontend · Build
     runs-on: ubuntu-latest
-    needs: test
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🟢 Setup Node ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: 📦 Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: 🛠️ Build (tsc + vite)
+        run: npm run build
+
+      - name: 📤 Upload dist artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+          retention-days: 7
+
+  # ────────────────────────────────────────────────────────────
+  # Job 2a: Build & Push — Backend image
+  # ────────────────────────────────────────────────────────────
+  build-backend:
+    name: 🐳 Build & Push · Backend
+    runs-on: ubuntu-latest
+    needs: [prepare, test-backend]
     if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
     outputs:
       image_tag: ${{ steps.meta.outputs.version }}
@@ -117,18 +169,18 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 🏷️ Extract metadata (tags, labels)
+      - name: 🏷️ Extract metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ needs.prepare.outputs.backend_image }}
           tags: |
             type=ref,event=branch
             type=sha,prefix=,format=short
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
             type=raw,value={{date 'YYYYMMDD-HHmmss'}}
 
-      - name: 🏗️ Build and push Docker image
+      - name: 🏗️ Build & push backend image
         id: build-push
         uses: docker/build-push-action@v5
         with:
@@ -137,20 +189,82 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
           platforms: linux/amd64
 
-      - name: 📋 Image summary
+      - name: 📋 Backend image summary
         run: |
-          echo "## 🐳 Docker Image Published" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| **Registry** | \`${{ env.REGISTRY }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Image** | \`${{ env.IMAGE_NAME }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Digest** | \`${{ steps.build-push.outputs.digest }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Tags** | ${{ steps.meta.outputs.tags }} |" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "## 🐳 Backend Image Published"
+            echo ""
+            echo "| Property | Value |"
+            echo "|----------|-------|"
+            echo "| **Image** | \`${{ env.REGISTRY }}/${{ needs.prepare.outputs.backend_image }}\` |"
+            echo "| **Digest** | \`${{ steps.build-push.outputs.digest }}\` |"
+            echo "| **Tags** | ${{ steps.meta.outputs.tags }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ────────────────────────────────────────────────────────────
+  # Job 2b: Build & Push — Frontend image
+  # ────────────────────────────────────────────────────────────
+  build-frontend:
+    name: 🐳 Build & Push · Frontend
+    runs-on: ubuntu-latest
+    needs: [prepare, test-frontend]
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
+    outputs:
+      image_tag: ${{ steps.meta.outputs.version }}
+      image_digest: ${{ steps.build-push.outputs.digest }}
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🔧 Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 🔑 Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🏷️ Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ needs.prepare.outputs.frontend_image }}
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix=,format=short
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value={{date 'YYYYMMDD-HHmmss'}}
+
+      - name: 🏗️ Build & push frontend image
+        id: build-push
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,mode=max,scope=frontend
+          platforms: linux/amd64
+
+      - name: 📋 Frontend image summary
+        run: |
+          {
+            echo "## 🐳 Frontend Image Published"
+            echo ""
+            echo "| Property | Value |"
+            echo "|----------|-------|"
+            echo "| **Image** | \`${{ env.REGISTRY }}/${{ needs.prepare.outputs.frontend_image }}\` |"
+            echo "| **Digest** | \`${{ steps.build-push.outputs.digest }}\` |"
+            echo "| **Tags** | ${{ steps.meta.outputs.tags }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # ────────────────────────────────────────────────────────────
   # Job 3: Deploy to Portainer
@@ -158,85 +272,98 @@ jobs:
   deploy:
     name: 🚀 Deploy to Portainer
     runs-on: ubuntu-latest
-    needs: build
+    needs: [build-backend, build-frontend]
     if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
     environment:
       name: ${{ github.event.inputs.deploy_environment || 'production' }}
       url: ${{ vars.PORTAINER_URL || 'https://portainer.example.com' }}
     steps:
-      - name: 🚀 Trigger Portainer Stack Webhook
+      - name: 🛡️ Validate secret
         run: |
-          echo "🚀 Triggering Portainer stack redeployment..."
-          echo "   Image tag: ${{ needs.build.outputs.image_tag }}"
-          echo "   Image digest: ${{ needs.build.outputs.image_digest }}"
-          
-          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-            -X POST \
-            "${{ secrets.PORTAINER_WEBHOOK_URL }}")
-          
+          if [ -z "${{ secrets.PORTAINER_WEBHOOK_URL }}" ]; then
+            echo "❌ Missing required secret: PORTAINER_WEBHOOK_URL"
+            exit 1
+          fi
+
+      - name: 🚀 Trigger Portainer Stack Webhook
+        env:
+          BACKEND_TAG: ${{ needs.build-backend.outputs.image_tag }}
+          FRONTEND_TAG: ${{ needs.build-frontend.outputs.image_tag }}
+        run: |
+          echo "🚀 Triggering Portainer stack redeployment"
+          echo "   Backend tag:  ${BACKEND_TAG}"
+          echo "   Frontend tag: ${FRONTEND_TAG}"
+
+          HTTP_STATUS=$(curl -s -o /tmp/resp.txt -w "%{http_code}" \
+            -X POST "${{ secrets.PORTAINER_WEBHOOK_URL }}" \
+            --max-time 30 --retry 2 --retry-delay 5)
+
           echo "   Response status: ${HTTP_STATUS}"
-          
+          cat /tmp/resp.txt || true
+
           if [ "${HTTP_STATUS}" -ge 200 ] && [ "${HTTP_STATUS}" -lt 300 ]; then
-            echo "✅ Portainer webhook triggered successfully!"
+            echo "✅ Portainer webhook triggered successfully"
           else
-            echo "❌ Portainer webhook failed with status: ${HTTP_STATUS}"
+            echo "❌ Portainer webhook failed (HTTP ${HTTP_STATUS})"
             exit 1
           fi
 
       - name: ⏳ Wait for deployment
         run: |
-          echo "⏳ Waiting 30 seconds for Portainer to pull and start the new image..."
+          echo "⏳ Waiting 30s for Portainer to pull and start new images..."
           sleep 30
 
-      - name: ✅ Verify deployment health
+      - name: ✅ Verify backend /health
         if: vars.DEPLOY_URL != ''
         continue-on-error: true
         run: |
-          echo "🏥 Checking deployment health..."
-          
-          for i in {1..5}; do
-            HTTP_STATUS=$(curl -s -o /tmp/health_response.json -w "%{http_code}" \
-              "${{ vars.DEPLOY_URL }}/health" \
-              --max-time 10)
-            
+          echo "🏥 Probing backend health at ${{ vars.DEPLOY_URL }}/health"
+          for i in 1 2 3 4 5; do
+            HTTP_STATUS=$(curl -s -o /tmp/health.json -w "%{http_code}" \
+              "${{ vars.DEPLOY_URL }}/health" --max-time 10)
             if [ "${HTTP_STATUS}" = "200" ]; then
-              echo "✅ Deployment is healthy!"
-              cat /tmp/health_response.json | python3 -m json.tool
-              break
+              echo "✅ Backend is healthy"
+              cat /tmp/health.json | python3 -m json.tool || cat /tmp/health.json
+              exit 0
             fi
-            
-            echo "⏳ Attempt ${i}/5 — Status: ${HTTP_STATUS}, retrying in 10s..."
+            echo "⏳ Attempt ${i}/5 — status ${HTTP_STATUS}, retrying in 10s..."
             sleep 10
           done
+          echo "⚠️ Backend did not return 200 within retry budget"
 
       - name: 📋 Deployment summary
         run: |
-          echo "## 🚀 Deployment Complete" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| **Environment** | \`${{ github.event.inputs.deploy_environment || 'production' }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Image Tag** | \`${{ needs.build.outputs.image_tag }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Triggered by** | \`${{ github.actor }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Commit** | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Timestamp** | \`$(date -u '+%Y-%m-%d %H:%M:%S UTC')\` |" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "## 🚀 Deployment Complete"
+            echo ""
+            echo "| Property | Value |"
+            echo "|----------|-------|"
+            echo "| **Environment** | \`${{ github.event.inputs.deploy_environment || 'production' }}\` |"
+            echo "| **Backend Tag** | \`${{ needs.build-backend.outputs.image_tag }}\` |"
+            echo "| **Frontend Tag** | \`${{ needs.build-frontend.outputs.image_tag }}\` |"
+            echo "| **Triggered by** | \`${{ github.actor }}\` |"
+            echo "| **Commit** | \`${{ github.sha }}\` |"
+            echo "| **Timestamp** | \`$(date -u '+%Y-%m-%d %H:%M:%S UTC')\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # ────────────────────────────────────────────────────────────
   # Job 4: Notify (on failure)
   # ────────────────────────────────────────────────────────────
   notify:
-    name: 📢 Notify
+    name: 📢 Notify on failure
     runs-on: ubuntu-latest
-    needs: [test, build, deploy]
+    needs: [test-backend, test-frontend, build-backend, build-frontend, deploy]
     if: failure()
     steps:
       - name: ❌ Pipeline failure summary
         run: |
-          echo "## ❌ Pipeline Failed" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| **Branch** | \`${{ github.ref_name }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Commit** | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Actor** | \`${{ github.actor }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Workflow** | [View Run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "## ❌ Pipeline Failed"
+            echo ""
+            echo "| Property | Value |"
+            echo "|----------|-------|"
+            echo "| **Branch** | \`${{ github.ref_name }}\` |"
+            echo "| **Commit** | \`${{ github.sha }}\` |"
+            echo "| **Actor** | \`${{ github.actor }}\` |"
+            echo "| **Workflow** | [View Run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |"
+          } >> "$GITHUB_STEP_SUMMARY"

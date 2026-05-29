@@ -1,37 +1,84 @@
-from typing import TypedDict, Annotated, Any
+"""Runtime state primitives for the Nexus-Agent control loop.
+
+Contains both the LangGraph ``AgentState`` (the shared blackboard used by the
+planner/executor/validator/learner pipeline) and the per-agent *runtime* state
+objects consumed by the Cyber-Thai Command Center dashboard.
+"""
+
+from __future__ import annotations
+
 import operator
-from pydantic import BaseModel
-from nexus_agent.core.models import AgentMessage
+import time
+from enum import Enum
+from typing import Annotated, Any, Optional, TypedDict
+
+from pydantic import BaseModel, Field
+
+from nexus_agent.core.models import AgentMessage, AgentRole
+
 
 class AgentState(TypedDict):
-    """
-    The shared state for the Nexus-Agent Control Loop (LangGraph).
-    This state flows between Planner -> Executor -> Validator.
-    """
-    # Using operator.add to append messages to the list
+    """Shared state for the Nexus-Agent control loop (LangGraph)."""
+
     messages: Annotated[list[AgentMessage], operator.add]
-    
-    # The original objective from the user
     goal: str
-    
-    # The execution plan created by the Planner
     plan: list[str]
-    
-    # The current active step in the plan
     current_step: str
-    
-    # Tool calls / actions taken in the current loop
     actions_taken: Annotated[list[str], operator.add]
-    
-    # Feedback from the Validator (success, failed, pending)
     validation_status: str
     validation_feedback: str
-    
-    # Rules retrieved and used by the Planner in this execution
     used_rule_ids: Annotated[list[str], operator.add]
-    
-    # Skills learned from this execution
     learned_skills: Annotated[list[str], operator.add]
-    
-    # The final deliverable / output
     final_output: Any
+
+
+class AgentMicroState(str, Enum):
+    """Fine-grained activity states emitted by each agent.
+
+    Mapped 1:1 to avatar animations in the Cyber-Thai Command Center UI.
+    """
+
+    IDLE = "idle"
+    THINKING = "thinking"
+    PLANNING = "planning"
+    CODING = "coding"
+    DESIGNING = "designing"
+    TESTING = "testing"
+    EXECUTING = "executing"
+    OPTIMIZING = "optimizing"
+    WAITING_FOR_HUMAN = "waiting_for_human"
+    ERROR = "error"
+    COMPLETED = "completed"
+
+
+class AgentMetrics(BaseModel):
+    """Lightweight per-agent metric snapshot used by the dashboard."""
+
+    processing_time_ms: float = 0.0
+    tokens_in: int = 0
+    tokens_out: int = 0
+    cost_usd: float = 0.0
+    cpu_percent: float = 0.0
+    memory_mb: float = 0.0
+
+
+class AgentRuntimeState(BaseModel):
+    """Public, dashboard-facing snapshot of one agent.
+
+    ``current_micro_state`` and ``status_message`` are the two fields the UI
+    reads on every WebSocket event to decide which animation/banner to render.
+    """
+
+    agent_id: str
+    role: AgentRole
+    display_name: str = ""
+    current_micro_state: AgentMicroState = AgentMicroState.IDLE
+    status_message: str = ""
+    last_updated: float = Field(default_factory=lambda: time.time())
+    metrics: AgentMetrics = Field(default_factory=AgentMetrics)
+    current_task_id: Optional[str] = None
+    exp_points: int = 0  # Gamification: incremented on successful task completion
+
+    def touch(self) -> None:
+        """Refresh ``last_updated`` timestamp."""
+        self.last_updated = time.time()
