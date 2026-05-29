@@ -51,7 +51,11 @@ WORKDIR /app
 # Copy application source
 COPY pyproject.toml .
 COPY requirements.txt .
+COPY alembic.ini .
+COPY alembic/ ./alembic/
 COPY nexus_agent/ ./nexus_agent/
+COPY docker/entrypoint.sh /usr/local/bin/nexus-entrypoint
+RUN chmod +x /usr/local/bin/nexus-entrypoint
 
 # Install the package itself (non-editable for production)
 RUN pip install --no-cache-dir .
@@ -70,7 +74,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
     CMD curl -f http://localhost:8080/health || exit 1
 
 # Use tini as init system for proper signal handling
-ENTRYPOINT ["tini", "--"]
+ENTRYPOINT ["tini", "--", "nexus-entrypoint"]
 
 # Start the application
 CMD ["python", "-m", "uvicorn", "nexus_agent.entrypoint:app", \

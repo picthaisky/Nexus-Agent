@@ -15,7 +15,7 @@ services:
     container_name: nexus-agent-app
     restart: unless-stopped
     ports:
-      - "${NEXUS_PORT:-8080}:8080"
+      - "${NEXUS_PORT:-5190}:8080"
     env_file:
       - Stack.env
     environment:
@@ -42,6 +42,24 @@ services:
       - "com.nexus-agent.service=app"
       - "com.nexus-agent.version=${NEXUS_IMAGE_TAG:-latest}"
 
+  # ── Cyber-Thai Command Center (React Dashboard) ──────────────
+  nexus-dashboard:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: ghcr.io/picthaisky/nexus-agent-frontend:${NEXUS_IMAGE_TAG:-latest}
+    container_name: nexus-dashboard
+    restart: unless-stopped
+    ports:
+      - "${DASHBOARD_PORT:-3990}:80"
+    depends_on:
+      nexus-agent:
+        condition: service_healthy
+    networks:
+      - nexus-network
+    labels:
+      - "com.nexus-agent.service=dashboard"
+
   # ── Redis (Cache / Memory Store) ─────────────────────────────
   nexus-redis:
     image: redis:7-alpine
@@ -54,7 +72,7 @@ services:
       --appendonly yes
       --requirepass ${REDIS_PASSWORD:-nexus_redis_secret}
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      - "${REDIS_PORT:-6399}:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-nexus_redis_secret}", "ping"]
       interval: 10s
@@ -79,7 +97,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-nexus_agent}
       PGDATA: /var/lib/postgresql/data/pgdata
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "${POSTGRES_PORT:-5492}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nexus} -d ${POSTGRES_DB:-nexus_agent}"]
       interval: 10s

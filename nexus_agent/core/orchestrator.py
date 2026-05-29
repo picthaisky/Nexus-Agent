@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import Any, Callable, Dict, TypeVar
 
 from nexus_agent.core.state import AgentState
+from nexus_agent.core.dashboard_hub import dashboard_hub
+from nexus_agent.core.state import AgentMicroState
 from nexus_agent.agents.planner import PlannerAgent
 from nexus_agent.agents.executor import ExecutorAgent
 from nexus_agent.agents.validator import ValidatorAgent
@@ -94,7 +96,17 @@ class Orchestrator:
         recipient: AgentRole,
         payload: dict[str, Any],
         runner: Callable[[dict[str, Any]], T],
+        agent_id: str | None = None,
+        micro_state: AgentMicroState = AgentMicroState.EXECUTING,
+        status_message: str = "",
     ) -> T:
+        if agent_id:
+            dashboard_hub.emit_state_threadsafe(
+                agent_id=agent_id,
+                role=sender,
+                micro_state=micro_state,
+                status_message=status_message or f"{sender.value} → {recipient.value}",
+            )
         try:
             result = runner(payload)
             self._message_log.append(
@@ -105,6 +117,14 @@ class Orchestrator:
                     status=TaskStatus.COMPLETED,
                 )
             )
+            if agent_id:
+                dashboard_hub.emit_state_threadsafe(
+                    agent_id=agent_id,
+                    role=sender,
+                    micro_state=AgentMicroState.COMPLETED,
+                    status_message="Task completed",
+                    exp_delta=10,
+                )
             return result
         except Exception:
             self._message_log.append(
@@ -115,6 +135,13 @@ class Orchestrator:
                     status=TaskStatus.FAILED,
                 )
             )
+            if agent_id:
+                dashboard_hub.emit_state_threadsafe(
+                    agent_id=agent_id,
+                    role=sender,
+                    micro_state=AgentMicroState.ERROR,
+                    status_message="Task failed",
+                )
             raise
 
     def run_architect(self, payload: dict[str, Any]) -> ArchitecturePlan:
@@ -124,6 +151,9 @@ class Orchestrator:
             recipient=AgentRole.DEVELOPER,
             payload=payload,
             runner=self.architect_agent.run,
+            agent_id="architect",
+            micro_state=AgentMicroState.DESIGNING,
+            status_message="Designing architecture",
         )
 
     def run_developer(self, payload: dict[str, Any]) -> ImplementationPlan:
@@ -133,6 +163,9 @@ class Orchestrator:
             recipient=AgentRole.AUTONOMOUS_OPTIMIZER,
             payload=payload,
             runner=self.developer_agent.run,
+            agent_id="developer",
+            micro_state=AgentMicroState.CODING,
+            status_message="Generating implementation",
         )
 
     def run_optimizer(self, payload: dict[str, Any]) -> OptimizationResult:
@@ -142,6 +175,9 @@ class Orchestrator:
             recipient=AgentRole.TECHNICAL_ARCHITECT,
             payload=payload,
             runner=self.optimizer_agent.run,
+            agent_id="optimizer",
+            micro_state=AgentMicroState.OPTIMIZING,
+            status_message="Optimizing prompts",
         )
 
     def run_pipeline(
@@ -180,17 +216,25 @@ class Orchestrator:
         
         # Validator always goes to Learner to extract lessons (or anti-patterns)
         workflow.add_edge("validator", "learner")
-        
-        # Conditional Edge after Learner
+
+        node_to_agent: dict[str, tuple[str, AgentRole, AgentMicroState]] = {
+            "planner": ("planner", AgentRole.PLANNER, AgentMicroState.PLANNING),
+            "executor": ("developer", AgentRole.DEVELOPER, AgentMicroState.EXECUTING),
+            "validator": ("validator", AgentRole.VALIDATOR, AgentMicroState.TESTING),
+            "learner": ("optimizer", AgentRole.AUTONOMOUS_OPTIMIZER, AgentMicroState.OPTIMIZING),
+        }
+        self._node_to_agent = node_to_agent
+
+        # Learner decides whether to loop back to the planner or finish.
         workflow.add_conditional_edges(
             "learner",
             self._after_learning,
             {
-                "continue": "executor", # Loop back to executor on fail
-                "end": END              # End workflow on success
-            }
+                "continue": "planner",  # Retry with lessons learned
+                "end": END,              # End workflow on success
+            },
         )
-        
+
         return workflow.compile()
         
     def _after_learning(self, state: AgentState) -> str:
@@ -220,8 +264,17 @@ class Orchestrator:
             # We log state transitions here
             for node_name, state_update in output.items():
                 print(f"--- Node Executed: {node_name} ---")
+                mapping = getattr(self, "_node_to_agent", {}).get(node_name)
+                if mapping:
+                    agent_id, role, micro = mapping
+                    dashboard_hub.emit_state_threadsafe(
+                        agent_id=agent_id,
+                        role=role,
+                        micro_state=micro,
+                        status_message=f"Executed node: {node_name}",
+                    )
             final_state = output
-            
+
         return final_state
 
     # ------------------------------------------------------------------

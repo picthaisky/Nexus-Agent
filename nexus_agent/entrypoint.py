@@ -9,28 +9,72 @@ from __future__ import annotations
 import os
 import sys
 import time
+import asyncio
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+from slowapi import _rate_limit_exceeded_handler
 
 from nexus_agent.core.knowledge_graph_engine import KnowledgeGraphEngine, RepoGraph
 from nexus_agent.core.skill_vault import SkillVault
+from nexus_agent.core.dashboard_hub import dashboard_hub
+from nexus_agent.core.inference import InferenceEngine
+from nexus_agent.core.observability import metrics_registry, HardwareMonitor
+from nexus_agent.core.state import AgentMicroState
+from nexus_agent.core.settings import get_settings
+from nexus_agent.core.security import (
+    Principal,
+    require_admin,
+    require_api_key,
+    verify_ws_token,
+)
+from nexus_agent.core.middleware import (
+    AccessLogMiddleware,
+    RequestIdMiddleware,
+    SecurityHeadersMiddleware,
+)
+from nexus_agent.core.logging_config import configure_logging
+from nexus_agent.core.rate_limit import limiter
+from nexus_agent.core.metrics import (
+    PrometheusMiddleware,
+    metrics_endpoint,
+    record_inference_call,
+)
+from nexus_agent.core.cost import estimate_cost
+from nexus_agent.core.sentry_init import init_sentry
 
 # ── Application metadata ────────────────────────────────────────────────────
-APP_NAME = "Nexus-Agent"
-APP_VERSION = os.getenv("APP_VERSION", "0.1.0")
-ENVIRONMENT = os.getenv("ENVIRONMENT", "production")
+settings = get_settings()
+configure_logging(level=settings.log_level, json_logs=settings.json_logs)
+init_sentry()
+
+APP_NAME = settings.app_name
+APP_VERSION = settings.app_version
+ENVIRONMENT = settings.environment
 START_TIME = time.monotonic()
 DEFAULT_REPO_ROOT = os.getenv("NEXUS_REPO_ROOT", str(Path.cwd()))
 
 kg_engine = KnowledgeGraphEngine()
 skill_vault = SkillVault(db_path=os.getenv("SKILL_VAULT_DB", "nexus_skill_vault.db"))
+inference_engine: InferenceEngine | None = None
+
+
+def get_inference_engine() -> InferenceEngine:
+    """Lazy-init the inference engine after env vars are loaded."""
+    global inference_engine
+    if inference_engine is None:
+        inference_engine = InferenceEngine()
+    return inference_engine
+
+
 KG_CACHE: RepoGraph | None = None
 KG_CACHE_ROOT: str | None = None
 
@@ -43,14 +87,33 @@ app = FastAPI(
     redoc_url="/redoc" if ENVIRONMENT != "production" else None,
 )
 
+# ── Middleware stack (order matters — outermost first) ──────────────────────
+app.add_middleware(AccessLogMiddleware)
+app.add_middleware(SecurityHeadersMiddleware, enable_hsts=settings.is_production)
+app.add_middleware(RequestIdMiddleware)
+if settings.metrics_enabled:
+    app.add_middleware(PrometheusMiddleware)
+    app.add_route("/metrics", metrics_endpoint, include_in_schema=False)
+if settings.rate_limit_enabled:
+    app.state.limiter = limiter
+    app.add_middleware(SlowAPIMiddleware)
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 # ── CORS ─────────────────────────────────────────────────────────────────────
-ALLOWED_ORIGINS = os.getenv("CORS_ORIGINS", "*").split(",")
+ALLOWED_ORIGINS = settings.cors_origins or ["*"]
+if settings.is_production and ALLOWED_ORIGINS == ["*"]:
+    # Refuse the dangerous wildcard in production — force operator to be explicit.
+    import warnings
+    warnings.warn(
+        "CORS_ORIGINS='*' in production; set an allow-list of trusted origins.",
+        stacklevel=2,
+    )
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-API-Key", "X-Request-ID"],
 )
 
 
@@ -118,6 +181,27 @@ class SkillExecutionRequest(BaseModel):
     feedback: str = ""
 
 
+
+class InferenceRequest(BaseModel):
+    messages: list[dict[str, str]] = Field(
+        ..., description="OpenAI-style chat messages: [{role, content}, ...]"
+    )
+    provider: str | None = Field(
+        default=None,
+        description="Force a specific provider (e.g. 'openai', 'claude', 'gemini', 'local'). Omit to use the fallback chain.",
+    )
+    temperature: float = Field(default=0.7, ge=0.0, le=2.0)
+    max_tokens: int = Field(default=1024, ge=1, le=32768)
+
+
+class AgentEmitRequest(BaseModel):
+    """Manually push an agent state change to the dashboard (testing / external use)."""
+
+    agent_id: str
+    micro_state: AgentMicroState
+    status_message: str = ""
+    exp_delta: int = 0
+
 class SkillResearchRequest(BaseModel):
     topic: str
     top_k: int = Field(default=5, ge=1, le=20)
@@ -128,6 +212,35 @@ class SkillResearchRequest(BaseModel):
 class AutonomousPlanRequest(BaseModel):
     task_text: str
     top_k: int = Field(default=5, ge=1, le=20)
+
+
+@app.on_event("startup")
+async def _bind_dashboard_loop() -> None:
+    """Allow synchronous orchestrator code to schedule dashboard emits."""
+    dashboard_hub.set_loop(asyncio.get_running_loop())
+
+
+@app.on_event("shutdown")
+async def _graceful_shutdown() -> None:
+    """Drain WebSocket clients and dispose of pooled resources."""
+    logger = logging.getLogger("nexus.shutdown")
+    try:
+        await dashboard_hub.broadcast_event(
+            "system.shutdown",
+            {"message": "server shutting down"},
+        )
+        await dashboard_hub.disconnect_all()
+    except Exception as exc:  # pragma: no cover — best-effort
+        logger.warning("dashboard_drain_failed", extra={"error": str(exc)})
+
+    try:
+        from nexus_agent.core.database import engine as db_engine
+
+        db_engine.dispose()
+    except Exception as exc:  # pragma: no cover
+        logger.warning("db_dispose_failed", extra={"error": str(exc)})
+
+    logger.info("shutdown_complete")
 
 
 def _resolve_repo_root(repo_root: str | None) -> str:
@@ -167,26 +280,47 @@ async def health_check():
 
 @app.get("/ready", tags=["ops"])
 async def readiness_check():
-    """Readiness probe — returns 200 when the service is ready to serve."""
-    # TODO: add dependency checks (Redis, Postgres, inference engine)
+    """Readiness probe — returns 200 only when all configured dependencies are healthy."""
+    from sqlalchemy import text  # local import to keep cold-start light
+
+    from nexus_agent.core.database import engine as db_engine
+    from nexus_agent.core.redis_client import ping_redis
+
     checks: dict[str, str] = {}
+    healthy = True
 
-    redis_url = os.getenv("REDIS_URL")
-    if redis_url:
-        checks["redis"] = "configured"
+    # Postgres
+    if settings.database_url:
+        try:
+            with db_engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            checks["postgres"] = "ok"
+        except Exception as exc:
+            checks["postgres"] = f"error: {exc.__class__.__name__}"
+            healthy = False
 
-    postgres_url = os.getenv("DATABASE_URL")
-    if postgres_url:
-        checks["postgres"] = "configured"
+    # Redis
+    if settings.redis_url:
+        if await ping_redis():
+            checks["redis"] = "ok"
+        else:
+            checks["redis"] = "error"
+            healthy = False
 
-    openai_key = os.getenv("OPENAI_API_KEY")
-    if openai_key:
-        checks["inference"] = "configured"
+    # Provider configuration (key presence only — no outbound calls)
+    if settings.openai_api_key:
+        checks["openai"] = "configured"
+    if settings.anthropic_api_key:
+        checks["claude"] = "configured"
+    if settings.gemini_api_key or os.getenv("GOOGLE_API_KEY"):
+        checks["gemini"] = "configured"
+    if settings.vllm_enabled:
+        checks["vllm_local"] = "configured"
 
     return JSONResponse(
-        status_code=200,
+        status_code=200 if healthy else 503,
         content={
-            "status": "ready",
+            "status": "ready" if healthy else "degraded",
             "service": APP_NAME,
             "environment": ENVIRONMENT,
             "checks": checks,
@@ -209,6 +343,8 @@ async def system_info():
             "config": {
                 "openai_base_url": os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
                 "openai_model": os.getenv("OPENAI_MODEL", "gpt-4"),
+                "anthropic_model": os.getenv("ANTHROPIC_MODEL", "claude-3-5-sonnet-20240620"),
+                "gemini_model": os.getenv("GEMINI_MODEL", "gemini-1.5-flash"),
                 "log_level": os.getenv("LOG_LEVEL", "INFO"),
                 "workers": os.getenv("WEB_CONCURRENCY", "2"),
             },
@@ -230,6 +366,11 @@ async def root():
             "kg_build": "/kg/build",
             "skills_search": "/skills/search",
             "skills_import_github": "/skills/import-github",
+            "inference_providers": "/inference/providers",
+            "inference_generate": "/inference/generate",
+            "dashboard_snapshot": "/dashboard/snapshot",
+            "dashboard_metrics": "/dashboard/metrics",
+            "dashboard_ws": "/ws/dashboard",
             "docs": "/docs" if ENVIRONMENT != "production" else "disabled",
         },
     }
@@ -436,3 +577,119 @@ async def skills_autonomous_plan(request: AutonomousPlanRequest):
         return skill_vault.plan_autonomous_task(task_text=request.task_text, top_k=request.top_k)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+# -- Multi-Provider Inference API -------------------------------------------
+@app.get("/inference/providers", tags=["inference"])
+async def inference_providers(_: Principal = Depends(require_api_key)):
+    """List active LLM providers (OpenAI / Claude / Gemini / local / ...)."""
+    try:
+        return {"providers": get_inference_engine().list_providers()}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/inference/generate", tags=["inference"])
+@limiter.limit(settings.rate_limit_inference)
+async def inference_generate(
+    request: Request,
+    payload: InferenceRequest,
+    principal: Principal = Depends(require_api_key),
+):
+    """Send a chat-completion request through the configured provider chain."""
+    request_id = getattr(request.state, "request_id", "")
+    start = time.perf_counter()
+    try:
+        result = get_inference_engine().generate_detailed(
+            payload.messages,
+            temperature=payload.temperature,
+            max_tokens=payload.max_tokens,
+            provider=payload.provider,
+        )
+    except Exception as exc:
+        elapsed = time.perf_counter() - start
+        record_inference_call(
+            provider=payload.provider or "auto",
+            model="unknown",
+            tokens_in=0,
+            tokens_out=0,
+            cost_usd=0.0,
+            latency_seconds=elapsed,
+            error=exc.__class__.__name__,
+        )
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    elapsed = time.perf_counter() - start
+    cost = estimate_cost(result.model, result.tokens_in, result.tokens_out)
+    record_inference_call(
+        provider=result.provider,
+        model=result.model,
+        tokens_in=result.tokens_in,
+        tokens_out=result.tokens_out,
+        cost_usd=cost.total_usd,
+        latency_seconds=elapsed,
+    )
+    return {
+        "content": result.content,
+        "provider": result.provider,
+        "model": result.model,
+        "tokens_in": result.tokens_in,
+        "tokens_out": result.tokens_out,
+        "cost_usd": round(cost.total_usd, 6),
+        "latency_ms": round(elapsed * 1000.0, 2),
+        "request_id": request_id,
+    }
+
+
+# -- Cyber-Thai Command Center: Dashboard API -------------------------------
+@app.get("/dashboard/snapshot", tags=["dashboard"])
+async def dashboard_snapshot():
+    """Return the current per-agent runtime state snapshot."""
+    return dashboard_hub.snapshot()
+
+
+@app.get("/dashboard/metrics", tags=["dashboard"])
+async def dashboard_metrics():
+    """Return aggregated per-agent metrics + GPU stats for the dashboard."""
+    return {
+        "agents": metrics_registry.snapshot(),
+        "hardware": HardwareMonitor.get_gpu_metrics(),
+    }
+
+
+@app.post("/dashboard/emit", tags=["dashboard"])
+async def dashboard_emit(
+    request: AgentEmitRequest,
+    _: Principal = Depends(require_admin),
+):
+    """Manually emit an agent-state event (handy for demos & integration tests)."""
+    state = dashboard_hub.get_state(request.agent_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail=f"Unknown agent_id '{request.agent_id}'")
+    await dashboard_hub.emit_state(
+        agent_id=request.agent_id,
+        role=state.role,
+        micro_state=request.micro_state,
+        status_message=request.status_message,
+        exp_delta=request.exp_delta,
+    )
+    return {"status": "ok", "agent_id": request.agent_id}
+
+
+@app.websocket("/ws/dashboard")
+async def ws_dashboard(
+    websocket: WebSocket,
+    _: Principal = Depends(verify_ws_token),
+):
+    """Real-time event stream consumed by the Cyber-Thai Command Center UI."""
+    await dashboard_hub.connect(websocket)
+    try:
+        while True:
+            # We only push; ignore incoming text but keep the socket alive.
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
+    finally:
+        await dashboard_hub.disconnect(websocket)

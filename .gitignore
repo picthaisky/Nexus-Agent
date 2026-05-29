@@ -32,3 +32,12 @@ htmlcov/
 # Environment / Secrets
 .env
 *.local
+
+# Local dev artifacts
+.history/
+nexus_local.db
+uv.lock
+node_modules/
+frontend/node_modules/
+frontend/dist/
+
