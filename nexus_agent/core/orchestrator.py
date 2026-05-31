@@ -10,8 +10,6 @@ import json
 import logging
 from langgraph.graph import StateGraph, END
 from pathlib import Path
-
-logger = logging.getLogger(__name__)
 from typing import Any, Callable, Dict, TypeVar
 
 from nexus_agent.core.state import AgentState
@@ -35,8 +33,12 @@ from nexus_agent.core.models import (
     ImplementationPlan,
     OptimizationResult,
     TaskStatus,
+    TestingPlan,
 )
 from nexus_agent.core.skill_vault import SkillVault
+from nexus_agent.core.inference import get_inference_engine
+
+logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
