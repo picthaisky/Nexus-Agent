@@ -5,10 +5,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from nexus_agent.core.state import AgentState
 from nexus_agent.core.memory import ProceduralMemory
 
-try:
-    from langchain_openai import ChatOpenAI
-except ModuleNotFoundError:  # pragma: no cover - exercised in dependency-light environments
-    ChatOpenAI = None
+from nexus_agent.core.inference import InferenceEngine, InferenceConfig
 
 class LearnerAgent:
     """
@@ -17,25 +14,10 @@ class LearnerAgent:
     """
     def __init__(self, procedural_memory: ProceduralMemory):
         self.memory = procedural_memory
-        self.llm = self._build_llm()
-        
-        self.prompt = ChatPromptTemplate.from_messages([
-            ("system", "You are an AI Learner. Analyze the task execution trace.\n"
-                       "If it was SUCCESSFUL, extract a generalized 'Best Practice/Skill' to reuse.\n"
-                       "If it FAILED, extract an 'Anti-pattern' (what to avoid).\n"
-                       "Output ONLY a JSON object with two keys:\n"
-                       "'name': short descriptive title\n"
-                       "'content': markdown detailing the rule/warning and context."),
-            ("user", "Goal: {goal}\nPlan: {plan}\nActions Taken: {actions_taken}\nStatus: {status}\nFeedback: {feedback}")
-        ])
-
-    def _build_llm(self):
-        if ChatOpenAI is None:
-            return None
         try:
-            return ChatOpenAI(model="gpt-4o", temperature=0.2)
+            self.engine = InferenceEngine(InferenceConfig())
         except Exception:
-            return None
+            self.engine = None
         
     def run(self, state: AgentState) -> dict[str, Any]:
         goal = state.get("goal", "")
@@ -47,7 +29,7 @@ class LearnerAgent:
         if not actions_taken:
             return {"messages": [{"role": "learner", "content": "No actions taken, nothing to learn."}]}
 
-        if self.llm is None:
+        if self.engine is None or not getattr(self.engine, "_adapters", True):
             rule_name = f"fallback_{status}_pattern"
             rule_content = (
                 f"Goal: {goal}\n"
@@ -61,21 +43,31 @@ class LearnerAgent:
                 "learned_skills": [rule_name],
                 "messages": [{
                     "role": "learner",
-                    "content": f"Saved fallback rule without LLM: {rule_name} (ID: {rule_id})",
+                    "content": f"Saved fallback rule without LLM engine: {rule_name} (ID: {rule_id})",
                 }],
             }
             
         try:
-            chain = self.prompt | self.llm
-            response = chain.invoke({
-                "goal": goal,
-                "plan": json.dumps(plan),
-                "actions_taken": json.dumps(actions_taken),
-                "status": status,
-                "feedback": feedback
-            })
+            system_prompt = (
+                "You are an AI Learner. Analyze the task execution trace.\n"
+                "If it was SUCCESSFUL, extract a generalized 'Best Practice/Skill' to reuse.\n"
+                "If it FAILED, extract an 'Anti-pattern' (what to avoid).\n"
+                "Output ONLY a JSON object with two keys:\n"
+                "'name': short descriptive title\n"
+                "'content': markdown detailing the rule/warning and context."
+            )
             
-            content = response.content
+            user_prompt = f"Goal: {goal}\nPlan: {json.dumps(plan)}\nActions Taken: {json.dumps(actions_taken)}\nStatus: {status}\nFeedback: {feedback}"
+            
+            resp = self.engine.generate_detailed(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.2
+            )
+            
+            content = resp.content
             if "```json" in content:
                 content = content.split("```json")[1].split("```")[0].strip()
             elif "```" in content:
