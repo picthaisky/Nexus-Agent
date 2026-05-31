@@ -49,6 +49,7 @@ class AgentMicroState(str, Enum):
     WAITING_FOR_HUMAN = "waiting_for_human"
     ERROR = "error"
     COMPLETED = "completed"
+    WALKING = "walking"
 
 
 class AgentMetrics(BaseModel):

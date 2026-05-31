@@ -253,6 +253,18 @@ class AutonomousPlanRequest(BaseModel):
     top_k: int = Field(default=5, ge=1, le=20)
 
 
+class AgentspaceSearchRequest(BaseModel):
+    query: str
+
+
+class FinanceRequest(BaseModel):
+    task: str
+
+
+class ContentRequest(BaseModel):
+    topic: str
+
+
 class ConnectRepoRequest(BaseModel):
     repo_url: str
     branch: str = "main"
@@ -679,6 +691,58 @@ async def inference_generate(
         "latency_ms": round(elapsed * 1000.0, 2),
         "request_id": request_id,
     }
+
+
+# -- Agentspace API ---------------------------------------------------------
+@app.post("/agentspace/search", tags=["agentspace"])
+async def agentspace_search(
+    request: AgentspaceSearchRequest,
+    principal: Principal = Depends(require_api_key),
+):
+    """Run a search query through the SearchAgent."""
+    try:
+        from nexus_agent.core.orchestrator import Orchestrator
+        # Instantiate orchestrator on the fly or we should use a global one.
+        # But wait, we don't have a global orchestrator in entrypoint.
+        # Let's just create one for this single run to stay stateless.
+        orch = Orchestrator()
+        result = orch.run_search({"query": request.query})
+        
+        # result is an AgentspaceSearchResult
+        from dataclasses import asdict
+        return result.model_dump()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/agents/finance/analyze", tags=["specialist"])
+async def finance_analyze(
+    request: FinanceRequest,
+    principal: Principal = Depends(require_api_key),
+):
+    """Run a finance analysis task through the FinanceAgent."""
+    try:
+        from nexus_agent.core.orchestrator import Orchestrator
+        orch = Orchestrator()
+        result = orch.run_finance({"task": request.task})
+        return result.model_dump()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/agents/content/generate", tags=["specialist"])
+async def content_generate(
+    request: ContentRequest,
+    principal: Principal = Depends(require_api_key),
+):
+    """Run a content creation task through the ContentCreatorAgent."""
+    try:
+        from nexus_agent.core.orchestrator import Orchestrator
+        orch = Orchestrator()
+        result = orch.run_content({"topic": request.topic})
+        return result.model_dump()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 # -- Cyber-Thai Command Center: Dashboard API -------------------------------

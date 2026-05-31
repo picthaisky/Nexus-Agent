@@ -14,6 +14,8 @@ export function AgentAvatar({ agentId, microState }: AgentAvatarProps) {
     stateClass = "animate-pulse-fast";
   } else if (microState === "error") {
     stateClass = "animate-glitch-upright";
+  } else if (microState === "walking") {
+    stateClass = "animate-walk-upright";
   }
 
   // Neon color filters for SVGs

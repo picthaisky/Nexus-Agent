@@ -19,6 +19,7 @@ class AgentRole(str, Enum):
     """
 
     TECHNICAL_ARCHITECT = "technical_architect"
+
     DEVELOPER = "developer"
     AUTONOMOUS_OPTIMIZER = "autonomous_optimizer"
     PLANNER = "planner"
@@ -26,6 +27,9 @@ class AgentRole(str, Enum):
     VALIDATOR = "validator"
     UI_WEAVER = "ui_weaver"
     LEARNER = "learner"
+    SEARCH_AGENT = "search_agent"
+    FINANCE_AGENT = "finance_agent"
+    CONTENT_CREATOR_AGENT = "content_creator_agent"
 
 
 class TaskStatus(str, Enum):
@@ -186,3 +190,25 @@ class AgentMessage(BaseModel):
     recipient: AgentRole
     payload: dict[str, Any]
     status: TaskStatus = TaskStatus.PENDING
+
+class AgentspaceSearchResult(BaseModel):
+    """Output produced by the Search Agent."""
+    
+    query: str
+    summary_md: str
+    sources: list[dict[str, str]] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class FinanceAnalysisResult(BaseModel):
+    """Output produced by the Finance Agent."""
+    task: str
+    analysis_md: str
+    metrics: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class ContentCreationResult(BaseModel):
+    """Output produced by the Content Creator Agent."""
+    topic: str
+    content_md: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

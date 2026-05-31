@@ -22,6 +22,31 @@ const AGENT_COORDS: Record<string, { left: number; top: number }> = {
 export function IsometricRoom({ agents, expEffects }: IsometricRoomProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const isDragging = useRef(false);
+  const lastPos = useRef({ x: 0, y: 0 });
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    isDragging.current = true;
+    lastPos.current = { x: e.clientX, y: e.clientY };
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!isDragging.current) return;
+    const dx = e.clientX - lastPos.current.x;
+    const dy = e.clientY - lastPos.current.y;
+    setPan(prev => ({ x: prev.x + dx, y: prev.y + dy }));
+    lastPos.current = { x: e.clientX, y: e.clientY };
+  };
+
+  const handleMouseUp = () => {
+    isDragging.current = false;
+  };
+
+  const handleWheel = (e: React.WheelEvent) => {
+    e.preventDefault();
+    setScale(prev => Math.min(2.5, Math.max(0.3, prev - e.deltaY * 0.001)));
+  };
 
   // Responsive scaling logic
   useEffect(() => {
@@ -42,7 +67,12 @@ export function IsometricRoom({ agents, expEffects }: IsometricRoomProps) {
   return (
     <div 
       ref={containerRef} 
-      className="relative w-full h-[380px] md:h-[450px] lg:h-[500px] flex items-center justify-center overflow-hidden border border-cyber-neon/15 bg-cyber-panel/30 rounded-2xl shadow-2xl backdrop-blur-sm"
+      className="relative w-full h-[380px] md:h-[450px] lg:h-[500px] flex items-center justify-center overflow-hidden border border-cyber-neon/15 bg-cyber-panel/30 rounded-2xl shadow-2xl backdrop-blur-sm cursor-grab active:cursor-grabbing"
+      onMouseDown={handleMouseDown}
+      onMouseMove={handleMouseMove}
+      onMouseUp={handleMouseUp}
+      onMouseLeave={handleMouseUp}
+      onWheel={handleWheel}
     >
       {/* Sci-Fi Decorative Grid Header */}
       <div className="absolute top-3 left-4 text-[10px] font-mono text-cyber-neon/60 select-none pointer-events-none uppercase tracking-[0.15em] flex items-center gap-2">
@@ -51,19 +81,42 @@ export function IsometricRoom({ agents, expEffects }: IsometricRoomProps) {
       </div>
 
       {/* 3D Isometric Viewport */}
-      <div className="isometric-viewport w-full h-full flex items-center justify-center">
+      <div 
+        className="isometric-viewport w-full h-full flex items-center justify-center"
+        style={{ transform: `translate(${pan.x}px, ${pan.y}px)` }}
+      >
         
-        {/* The Rotated Floor */}
+        {/* The Rotated Floor Assembly */}
         <div 
-          className="isometric-floor relative w-[460px] h-[280px] rounded-xl border-2 border-cyber-neon/30 select-none"
+          className="relative w-[460px] h-[280px] select-none"
           style={{ 
             transform: `scale(${scale}) rotateX(60deg) rotateZ(-45deg)`,
-            boxShadow: "0 0 40px rgba(95,225,255,0.08), inset 0 0 30px rgba(95,225,255,0.05)"
+            transformStyle: "preserve-3d",
           }}
         >
-          
-          {/* Cyber-Thai Traditional Grid Overlay (Lying flat on the floor) */}
-          <div className="absolute inset-0 w-full h-full pointer-events-none rounded-xl overflow-hidden">
+          {/* Floor Depth (Front-Right Face) */}
+          <div 
+            className="absolute bottom-0 left-0 border-r border-b border-cyber-neon/20 bg-slate-900/80"
+            style={{
+              width: "460px",
+              height: "20px",
+              transformOrigin: "bottom",
+              transform: "rotateX(-90deg) translateZ(280px)",
+            }}
+          />
+          {/* Floor Depth (Front-Left Face) */}
+          <div 
+            className="absolute top-0 left-0 border-l border-b border-cyber-neon/20 bg-slate-900/90"
+            style={{
+              width: "20px",
+              height: "280px",
+              transformOrigin: "left",
+              transform: "rotateY(90deg) translateZ(0)",
+            }}
+          />
+
+          {/* Floor Surface */}
+          <div className="absolute inset-0 w-full h-full rounded-xl border-2 border-cyber-neon/30 bg-[radial-gradient(circle_at_center,rgba(15,22,38,0.95)_0%,rgba(7,11,20,0.98)_100%)] shadow-[0_0_40px_rgba(95,225,255,0.08),inset_0_0_30px_rgba(95,225,255,0.05)] transform-style-preserve-3d overflow-hidden">
             <svg className="w-full h-full opacity-40" xmlns="http://www.w3.org/2000/svg">
               <defs>
                 <radialGradient id="floorGrad" cx="50%" cy="50%" r="50%">
@@ -100,8 +153,6 @@ export function IsometricRoom({ agents, expEffects }: IsometricRoomProps) {
             if (!agent) return null;
 
             const coords = AGENT_COORDS[id] || { left: 0, top: 0 };
-            
-            // Check if there is an active EXP effect for this agent
             const expFx = expEffects.find((x) => x.agent_id === id);
 
             return (
@@ -110,7 +161,8 @@ export function IsometricRoom({ agents, expEffects }: IsometricRoomProps) {
                 className="absolute z-10"
                 style={{ 
                   left: `${coords.left}px`,
-                  top: `${coords.top}px`
+                  top: `${coords.top}px`,
+                  transform: "translateZ(1px)" // Lift slightly above floor
                 }}
               >
                 <DeskStation agent={agent} expDelta={expFx?.delta} />
