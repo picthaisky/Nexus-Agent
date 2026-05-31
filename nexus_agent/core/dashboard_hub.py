@@ -91,6 +91,25 @@ class DashboardHub:
     def get_state(self, agent_id: str) -> Optional[AgentRuntimeState]:
         return self._states.get(agent_id)
 
+    async def add_agent(self, agent_id: str, role: AgentRole, display_name: str) -> None:
+        """Register a new agent dynamically in the dashboard roster."""
+        state = AgentRuntimeState(agent_id=agent_id, role=role, display_name=display_name)
+        self._states[agent_id] = state
+        await self.broadcast(self.snapshot())
+
+    async def update_agent(self, agent_id: str, display_name: str) -> None:
+        """Update display name of an existing agent in the roster."""
+        if agent_id in self._states:
+            self._states[agent_id].display_name = display_name
+            self._states[agent_id].touch()
+            await self.broadcast(self.snapshot())
+
+    async def delete_agent(self, agent_id: str) -> None:
+        """Remove an agent dynamically from the dashboard roster."""
+        if agent_id in self._states:
+            del self._states[agent_id]
+            await self.broadcast(self.snapshot())
+
     def set_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         """Bind the running event loop so sync callers can schedule emits."""
         self._loop = loop
