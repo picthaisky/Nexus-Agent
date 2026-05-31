@@ -1,4 +1,4 @@
-from typing import Any, Dict, List
+from typing import Dict, List
 from langchain_core.tools import BaseTool
 
 class ToolRegistry:

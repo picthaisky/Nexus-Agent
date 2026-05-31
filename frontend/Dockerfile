@@ -6,7 +6,7 @@
 # ============================================================
 
 # ── Stage 1: Build the static bundle ────────────────────────
-FROM node:20-alpine AS builder
+FROM node:26-alpine AS builder
 
 WORKDIR /app
 
@@ -19,7 +19,7 @@ COPY src ./src
 RUN npm run build
 
 # ── Stage 2: Serve via nginx ────────────────────────────────
-FROM nginx:1.27-alpine AS production
+FROM nginx:1.31-alpine AS production
 
 LABEL org.opencontainers.image.source="https://github.com/picthaisky/Nexus-Agent"
 LABEL org.opencontainers.image.description="Cyber-Thai Command Center — React dashboard for Nexus-Agent"

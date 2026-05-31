@@ -6,7 +6,7 @@
 # ============================================================
 
 # ── Stage 1: Builder ─────────────────────────────────────────
-FROM python:3.10-slim AS builder
+FROM python:3.14-slim AS builder
 
 WORKDIR /build
 
@@ -25,7 +25,7 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
     pip install --no-cache-dir -r requirements.txt
 
 # ── Stage 2: Production ─────────────────────────────────────
-FROM python:3.10-slim AS production
+FROM python:3.14-slim AS production
 
 LABEL maintainer="picthaisky <picthaisky@github.com>"
 LABEL org.opencontainers.image.source="https://github.com/picthaisky/Nexus-Agent"
