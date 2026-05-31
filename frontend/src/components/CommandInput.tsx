@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, KeyboardEvent } from "react";
 import { Send, Terminal } from "lucide-react";
 
 interface CommandInputProps {
@@ -9,19 +9,49 @@ interface CommandInputProps {
 export function CommandInput({ onRunTask, disabled }: CommandInputProps) {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [history, setHistory] = useState<string[]>([]);
+  const [historyIndex, setHistoryIndex] = useState<number>(-1);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || loading || disabled) return;
     
+    const commandToRun = input.trim();
+    
+    setHistory((prev) => [...prev, commandToRun]);
+    setHistoryIndex(-1);
+    setInput("");
+    
     setLoading(true);
     try {
-      await onRunTask(input);
-      setInput("");
+      await onRunTask(commandToRun);
     } catch (err) {
       console.error(err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      if (history.length > 0) {
+        const nextIndex = historyIndex === -1 ? history.length - 1 : Math.max(0, historyIndex - 1);
+        setHistoryIndex(nextIndex);
+        setInput(history[nextIndex]);
+      }
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      if (historyIndex !== -1) {
+        const nextIndex = historyIndex + 1;
+        if (nextIndex >= history.length) {
+          setHistoryIndex(-1);
+          setInput("");
+        } else {
+          setHistoryIndex(nextIndex);
+          setInput(history[nextIndex]);
+        }
+      }
     }
   };
 
@@ -34,6 +64,7 @@ export function CommandInput({ onRunTask, disabled }: CommandInputProps) {
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
             disabled={disabled || loading}
             placeholder={loading ? "Executing task..." : "Enter command or task description..."}
             className="w-full rounded-lg border border-cyber-neon/30 bg-cyber-panel/50 py-4 pl-12 pr-16 text-slate-200 placeholder-slate-500 focus:border-cyber-neon focus:outline-none focus:ring-1 focus:ring-cyber-neon disabled:opacity-50"
