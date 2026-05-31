@@ -170,7 +170,7 @@ class HardwareMonitor:
     @staticmethod
     def get_gpu_metrics() -> dict:
         try:
-            import pynvml
+            import pynvml  # type: ignore
             pynvml.nvmlInit()
             handle = pynvml.nvmlDeviceGetHandleByIndex(0)
             mem_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
