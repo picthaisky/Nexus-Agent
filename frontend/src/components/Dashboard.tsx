@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Activity, Cpu, Wifi, WifiOff, LayoutGrid, Box, Sliders } from "lucide-react";
+import { Activity, Cpu, Wifi, WifiOff, LayoutGrid, Box, Sliders, Search, Briefcase } from "lucide-react";
 import { useAgentSocket } from "../hooks/useAgentSocket";
 import { AgentMonitorCell } from "./AgentMonitorCell";
 import { CommandInput } from "./CommandInput";
@@ -7,12 +7,14 @@ import { SystemHealthPanel } from "./SystemHealthPanel";
 import { LiveLogViewer } from "./LiveLogViewer";
 import { IsometricRoom } from "./IsometricRoom";
 import { WorkspacePanel } from "./WorkspacePanel";
+import { AgentspacePanel } from "./AgentspacePanel";
+import { SpecialistOfficePanel } from "./SpecialistOfficePanel";
 
 const ORDER = ["planner", "architect", "developer", "ui_weaver", "validator", "optimizer"];
 
 export default function Dashboard() {
   const { agents, connected, expEffects, logs } = useAgentSocket();
-  const [viewMode, setViewMode] = useState<"grid" | "isometric" | "workspace">("isometric");
+  const [viewMode, setViewMode] = useState<"grid" | "isometric" | "workspace" | "agentspace" | "specialists">("isometric");
 
   const cells = useMemo(() => {
     return ORDER.map((id) => agents[id]).filter(Boolean);
@@ -97,6 +99,28 @@ export default function Dashboard() {
                 <Sliders className="w-3.5 h-3.5" />
                 <span>Workspace Config</span>
               </button>
+              <button
+                onClick={() => setViewMode("agentspace")}
+                className={`flex items-center gap-1.5 px-3 py-1 text-[10px] md:text-xs rounded-md transition-all font-mono ${
+                  viewMode === "agentspace"
+                    ? "bg-cyber-neon/20 text-cyber-neon border border-cyber-neon/40 shadow-[0_0_10px_rgba(95,225,255,0.25)] font-bold"
+                    : "text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                <Search className="w-3.5 h-3.5" />
+                <span>Agentspace</span>
+              </button>
+              <button
+                onClick={() => setViewMode("specialists")}
+                className={`flex items-center gap-1.5 px-3 py-1 text-[10px] md:text-xs rounded-md transition-all font-mono ${
+                  viewMode === "specialists"
+                    ? "bg-cyber-neon/20 text-cyber-neon border border-cyber-neon/40 shadow-[0_0_10px_rgba(95,225,255,0.25)] font-bold"
+                    : "text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                <Briefcase className="w-3.5 h-3.5" />
+                <span>Specialists Office</span>
+              </button>
             </div>
 
             <div className="flex items-center gap-1">
@@ -138,8 +162,12 @@ export default function Dashboard() {
                 <AgentMonitorCell key={a.agent_id} agent={a} expFx={fxByAgent[a.agent_id]} />
               ))}
             </div>
-          ) : (
+          ) : viewMode === "workspace" ? (
             <WorkspacePanel />
+          ) : viewMode === "agentspace" ? (
+            <AgentspacePanel />
+          ) : (
+            <SpecialistOfficePanel />
           )}
         </section>
 

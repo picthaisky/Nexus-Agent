@@ -132,3 +132,14 @@ body {
   animation: pulse-success-aura 1.5s infinite;
 }
 
+@keyframes walk-upright {
+  0% { transform: translateY(0px) rotateZ(45deg) rotateX(-60deg); }
+  25% { transform: translateY(-4px) rotateZ(40deg) rotateX(-60deg); }
+  50% { transform: translateY(0px) rotateZ(45deg) rotateX(-60deg); }
+  75% { transform: translateY(-4px) rotateZ(50deg) rotateX(-60deg); }
+  100% { transform: translateY(0px) rotateZ(45deg) rotateX(-60deg); }
+}
+
+.animate-walk-upright {
+  animation: walk-upright 0.5s linear infinite;
+}

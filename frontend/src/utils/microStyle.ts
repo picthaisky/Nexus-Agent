@@ -26,5 +26,7 @@ export function microStyle(state: MicroState): {
       return { ring: "ring-cyber-gold/80",       glow: "shadow-[0_0_30px_-3px_#d4af37]", badge: "bg-cyber-gold/40",        label: "WAITING",   anim: "animate-pulse-slow" };
     case "error":
       return { ring: "ring-status-error/90",     glow: "shadow-[0_0_40px_-2px_#d94d4d]", badge: "bg-status-error/50",      label: "ERROR",     anim: "animate-pulse-fast" };
+    case "walking":
+      return { ring: "ring-cyber-neon/70",       glow: "shadow-[0_0_30px_-5px_#5fe1ff]", badge: "bg-cyber-neon/30",        label: "WALKING",   anim: "animate-walk-upright" };
   }
 }

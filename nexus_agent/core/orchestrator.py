@@ -22,6 +22,9 @@ from nexus_agent.agents.learner import LearnerAgent
 from nexus_agent.agents.technical_architect import TechnicalArchitectAgent
 from nexus_agent.agents.developer import DeveloperAgent
 from nexus_agent.agents.autonomous_optimizer import AutonomousOptimizerAgent
+from nexus_agent.agents.search_agent import SearchAgent
+from nexus_agent.agents.finance_agent import FinanceAgent
+from nexus_agent.agents.content_creator_agent import ContentCreatorAgent
 from nexus_agent.tools.base import ToolRegistry
 from nexus_agent.tools.system_tools import execute_cli_command, read_file, write_file
 from nexus_agent.core.memory import ProceduralMemory
@@ -65,6 +68,9 @@ class Orchestrator:
         self.architect_agent = TechnicalArchitectAgent()
         self.developer_agent = DeveloperAgent()
         self.optimizer_agent = AutonomousOptimizerAgent()
+        self.search_agent = SearchAgent()
+        self.finance_agent = FinanceAgent()
+        self.content_creator_agent = ContentCreatorAgent()
         self._message_log: list[AgentMessage] = []
         
         # Initialize Tools
@@ -181,6 +187,45 @@ class Orchestrator:
             agent_id="optimizer",
             micro_state=AgentMicroState.OPTIMIZING,
             status_message="Optimizing prompts",
+        )
+    def run_search(self, payload: dict[str, Any]) -> Any:
+        """Run search agent and log status."""
+        from nexus_agent.core.models import AgentspaceSearchResult
+        
+        # We define a custom return type signature using typing.Any in run_with_logging to avoid circular imports.
+        # But we know it returns AgentspaceSearchResult.
+        return self._run_with_logging(
+            sender=AgentRole.SEARCH_AGENT,
+            recipient=AgentRole.DEVELOPER, # Just routing it somewhere, UI is the real recipient
+            payload=payload,
+            runner=self.search_agent.run,
+            agent_id="search_agent",
+            micro_state=AgentMicroState.PLANNING,
+            status_message=f"Searching: {payload.get('query', '')[:20]}...",
+        )
+
+    def run_finance(self, payload: dict[str, Any]) -> Any:
+        """Run finance agent and log status."""
+        return self._run_with_logging(
+            sender=AgentRole.FINANCE_AGENT,
+            recipient=AgentRole.DEVELOPER,
+            payload=payload,
+            runner=self.finance_agent.run,
+            agent_id="finance_agent",
+            micro_state=AgentMicroState.PLANNING,
+            status_message=f"Analyzing Finance Data: {payload.get('task', '')[:20]}...",
+        )
+
+    def run_content(self, payload: dict[str, Any]) -> Any:
+        """Run content creator agent and log status."""
+        return self._run_with_logging(
+            sender=AgentRole.CONTENT_CREATOR_AGENT,
+            recipient=AgentRole.DEVELOPER,
+            payload=payload,
+            runner=self.content_creator_agent.run,
+            agent_id="content_creator_agent",
+            micro_state=AgentMicroState.CODING,
+            status_message=f"Drafting Content: {payload.get('topic', '')[:20]}...",
         )
 
     def run_pipeline(

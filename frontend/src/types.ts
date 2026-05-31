@@ -12,7 +12,8 @@ export type MicroState =
   | "optimizing"
   | "waiting_for_human"
   | "error"
-  | "completed";
+  | "completed"
+  | "walking";
 
 export type AgentRole =
   | "technical_architect"
