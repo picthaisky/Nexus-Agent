@@ -33,10 +33,8 @@ from nexus_agent.core.models import (
     ImplementationPlan,
     OptimizationResult,
     TaskStatus,
-    TestingPlan,
 )
 from nexus_agent.core.skill_vault import SkillVault
-from nexus_agent.core.inference import get_inference_engine
 
 logger = logging.getLogger(__name__)
 
