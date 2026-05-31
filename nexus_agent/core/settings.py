@@ -11,10 +11,13 @@ in development).  Using a single ``Settings`` instance gives us:
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import List, Literal
+from typing import Annotated, List, Literal
 
 from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+
+CsvList = Annotated[List[str], NoDecode]
 
 
 class Settings(BaseSettings):
@@ -38,11 +41,11 @@ class Settings(BaseSettings):
     # ── Security ─────────────────────────────────────────────────────────
     # Comma-separated list of accepted API keys.  Empty list disables auth
     # (NOT recommended outside development).
-    api_keys: List[str] = Field(default_factory=list, alias="NEXUS_API_KEYS")
-    admin_api_keys: List[str] = Field(default_factory=list, alias="NEXUS_ADMIN_API_KEYS")
+    api_keys: CsvList = Field(default_factory=list, alias="NEXUS_API_KEYS")
+    admin_api_keys: CsvList = Field(default_factory=list, alias="NEXUS_ADMIN_API_KEYS")
     auth_required: bool = Field(default=True, alias="NEXUS_AUTH_REQUIRED")
     ws_token: str = Field(default="", alias="NEXUS_WS_TOKEN")
-    cors_origins: List[str] = Field(default_factory=lambda: ["*"], alias="CORS_ORIGINS")
+    cors_origins: CsvList = Field(default_factory=lambda: ["*"], alias="CORS_ORIGINS")
 
     # ── Rate limiting ────────────────────────────────────────────────────
     rate_limit_enabled: bool = Field(default=True, alias="RATE_LIMIT_ENABLED")
