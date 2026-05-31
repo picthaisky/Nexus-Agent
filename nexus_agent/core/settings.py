@@ -13,7 +13,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Annotated, List, Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
@@ -85,6 +85,17 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             return [item.strip() for item in value.split(",") if item.strip()]
         return value
+
+    @model_validator(mode="after")
+    def _validate_auth(self):
+        if self.auth_required and not (self.api_keys or self.admin_api_keys):
+            import warnings
+            warnings.warn(
+                "NEXUS_AUTH_REQUIRED is true but neither NEXUS_API_KEYS nor NEXUS_ADMIN_API_KEYS are set. "
+                "Auth is effectively DISABLED. Do not use this in production!",
+                stacklevel=2,
+            )
+        return self
 
     # ── Convenience flags ────────────────────────────────────────────────
     @property

@@ -18,37 +18,9 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Dict, Iterator, Optional
 
+from nexus_agent.core.cost import estimate_cost
+
 logger = logging.getLogger(__name__)
-
-
-DEFAULT_PRICING: dict[str, tuple[float, float]] = {
-    # model -> (input_per_1k, output_per_1k) in USD
-    "gpt-4o": (0.0050, 0.0150),
-    "gpt-4o-mini": (0.00015, 0.0006),
-    "gpt-4": (0.03, 0.06),
-    "claude-3-5-sonnet": (0.003, 0.015),
-    "claude-3-opus": (0.015, 0.075),
-    "claude-3-haiku": (0.00025, 0.00125),
-    "gemini-1.5-pro": (0.00125, 0.005),
-    "gemini-1.5-flash": (0.000075, 0.0003),
-    "local": (0.0, 0.0),
-}
-
-
-def estimate_cost(model: str, tokens_in: int, tokens_out: int) -> float:
-    """Estimate cost in USD for ``(model, tokens_in, tokens_out)``.
-
-    Unknown models fall back to zero-cost.
-    """
-    # Allow partial-prefix matching for variants such as ``claude-3-5-sonnet-20240620``.
-    key = model
-    if key not in DEFAULT_PRICING:
-        for pricing_key in DEFAULT_PRICING:
-            if pricing_key != "local" and model.startswith(pricing_key):
-                key = pricing_key
-                break
-    inp, outp = DEFAULT_PRICING.get(key, DEFAULT_PRICING["local"])
-    return (tokens_in / 1000.0) * inp + (tokens_out / 1000.0) * outp
 
 
 @dataclass
@@ -95,7 +67,7 @@ class AgentMetricsRegistry:
             rec.total_processing_time_ms += processing_time_ms
             rec.tokens_in += tokens_in
             rec.tokens_out += tokens_out
-            rec.cost_usd += estimate_cost(model, tokens_in, tokens_out)
+            rec.cost_usd += estimate_cost(model, tokens_in, tokens_out).total_usd
             rec.last_model = model
             rec.last_updated = time.time()
             return rec
@@ -191,13 +163,32 @@ class ObservabilityManager:
 
 
 class HardwareMonitor:
-    """Stub hardware monitor returning GPU metrics for the dashboard."""
+    """Hardware monitor returning GPU metrics for the dashboard.
+    Will attempt to use real metrics if pynvml is available, else fallback to 0.
+    """
 
     @staticmethod
     def get_gpu_metrics() -> dict:
-        return {
-            "gpu_temp_c": 58,
-            "vram_used_mb": 11200,
-            "vram_total_mb": 24576,
-            "utilization_percent": 65,
-        }
+        try:
+            import pynvml
+            pynvml.nvmlInit()
+            handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+            mem_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+            util_info = pynvml.nvmlDeviceGetUtilizationRates(handle)
+            temp = pynvml.nvmlDeviceGetTemperature(handle, pynvml.NVML_TEMPERATURE_GPU)
+            
+            metrics = {
+                "gpu_temp_c": temp,
+                "vram_used_mb": mem_info.used // 1048576,
+                "vram_total_mb": mem_info.total // 1048576,
+                "utilization_percent": util_info.gpu,
+            }
+            pynvml.nvmlShutdown()
+            return metrics
+        except Exception:
+            return {
+                "gpu_temp_c": 0,
+                "vram_used_mb": 0,
+                "vram_total_mb": 0,
+                "utilization_percent": 0,
+            }

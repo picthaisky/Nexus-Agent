@@ -40,7 +40,15 @@ class CostEstimate:
 def estimate_cost(model: str, tokens_in: int, tokens_out: int) -> CostEstimate:
     """Return a best-effort cost estimate for the call.  Unknown models cost $0."""
 
-    in_price, out_price = _PRICING.get(model, (0.0, 0.0))
+    # Allow partial-prefix matching for variants such as ``claude-3-5-sonnet-20240620``.
+    key = model
+    if key not in _PRICING:
+        for pricing_key in _PRICING:
+            if pricing_key != "local" and model.startswith(pricing_key):
+                key = pricing_key
+                break
+
+    in_price, out_price = _PRICING.get(key, (0.0, 0.0))
     return CostEstimate(
         input_usd=(tokens_in / 1000.0) * in_price,
         output_usd=(tokens_out / 1000.0) * out_price,

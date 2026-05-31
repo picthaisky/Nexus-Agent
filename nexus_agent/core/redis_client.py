@@ -43,12 +43,13 @@ def get_redis() -> Optional["redis.Redis"]:
 
 async def ping_redis() -> bool:
     """Health-probe helper used by the readiness endpoint."""
+    import asyncio
 
     client = get_redis()
     if client is None:
         return False
     try:
-        return bool(client.ping())
+        return await asyncio.to_thread(client.ping)
     except Exception as exc:  # pragma: no cover — connection error
         logger.warning("redis_ping_failed", extra={"error": str(exc)})
         return False

@@ -1,17 +1,28 @@
 import os
 import subprocess
+import shlex
 from langchain_core.tools import tool
+
+ALLOWED_COMMANDS = {"ls", "pwd", "echo", "python", "pytest", "npm"}
 
 @tool
 def execute_cli_command(command: str) -> str:
     """
-    Executes a given CLI command in the shell and returns its output.
+    Executes a given CLI command and returns its output.
     Useful for running scripts, tests, or interacting with the OS.
     """
     try:
+        args = shlex.split(command)
+        if not args:
+            return "Error: Empty command."
+            
+        base_cmd = args[0]
+        if base_cmd not in ALLOWED_COMMANDS:
+            return f"Error: Command '{base_cmd}' is not allowed for security reasons."
+            
         result = subprocess.run(
-            command,
-            shell=True,
+            args,
+            shell=False,
             check=True,
             capture_output=True,
             text=True
@@ -19,6 +30,8 @@ def execute_cli_command(command: str) -> str:
         return result.stdout
     except subprocess.CalledProcessError as e:
         return f"Command failed with error code {e.returncode}.\nSTDOUT: {e.stdout}\nSTDERR: {e.stderr}"
+    except Exception as e:
+        return f"Error executing command: {str(e)}"
 
 @tool
 def read_file(file_path: str) -> str:

@@ -11,6 +11,8 @@ import sys
 import time
 import asyncio
 import logging
+import warnings
+from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -79,6 +81,36 @@ def get_inference_engine() -> InferenceEngine:
 KG_CACHE: RepoGraph | None = None
 KG_CACHE_ROOT: str | None = None
 
+# ── Server Events ────────────────────────────────────────────────────────────
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage startup and shutdown lifecycle events."""
+    # Startup
+    dashboard_hub.set_loop(asyncio.get_running_loop())
+    
+    yield
+    
+    # Shutdown
+    logger = logging.getLogger("nexus.shutdown")
+    try:
+        await dashboard_hub.broadcast_event(
+            "system.shutdown",
+            {"message": "server shutting down"},
+        )
+        await dashboard_hub.disconnect_all()
+    except Exception as exc:  # pragma: no cover — best-effort
+        logger.warning("dashboard_drain_failed", extra={"error": str(exc)})
+
+    try:
+        from nexus_agent.core.database import get_engine
+
+        get_engine().dispose()
+    except Exception as exc:  # pragma: no cover
+        logger.warning("db_dispose_failed", extra={"error": str(exc)})
+
+    logger.info("shutdown_complete")
+
 # ── FastAPI app ──────────────────────────────────────────────────────────────
 app = FastAPI(
     title=APP_NAME,
@@ -86,6 +118,7 @@ app = FastAPI(
     description="Multi-AI Agent Orchestration System",
     docs_url="/docs" if ENVIRONMENT != "production" else None,
     redoc_url="/redoc" if ENVIRONMENT != "production" else None,
+    lifespan=lifespan,
 )
 
 # ── Middleware stack (order matters — outermost first) ──────────────────────
@@ -104,7 +137,6 @@ if settings.rate_limit_enabled:
 ALLOWED_ORIGINS = settings.cors_origins or ["*"]
 if settings.is_production and ALLOWED_ORIGINS == ["*"]:
     # Refuse the dangerous wildcard in production — force operator to be explicit.
-    import warnings
     warnings.warn(
         "CORS_ORIGINS='*' in production; set an allow-list of trusted origins.",
         stacklevel=2,
@@ -216,34 +248,6 @@ class AutonomousPlanRequest(BaseModel):
     task_text: str
     top_k: int = Field(default=5, ge=1, le=20)
 
-
-@app.on_event("startup")
-async def _bind_dashboard_loop() -> None:
-    """Allow synchronous orchestrator code to schedule dashboard emits."""
-    dashboard_hub.set_loop(asyncio.get_running_loop())
-
-
-@app.on_event("shutdown")
-async def _graceful_shutdown() -> None:
-    """Drain WebSocket clients and dispose of pooled resources."""
-    logger = logging.getLogger("nexus.shutdown")
-    try:
-        await dashboard_hub.broadcast_event(
-            "system.shutdown",
-            {"message": "server shutting down"},
-        )
-        await dashboard_hub.disconnect_all()
-    except Exception as exc:  # pragma: no cover — best-effort
-        logger.warning("dashboard_drain_failed", extra={"error": str(exc)})
-
-    try:
-        from nexus_agent.core.database import engine as db_engine
-
-        db_engine.dispose()
-    except Exception as exc:  # pragma: no cover
-        logger.warning("db_dispose_failed", extra={"error": str(exc)})
-
-    logger.info("shutdown_complete")
 
 
 def _resolve_repo_root(repo_root: str | None) -> str:

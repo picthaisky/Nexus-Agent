@@ -45,14 +45,28 @@ def _build_engine() -> Engine:
     return create_engine(url, connect_args=connect_args, **engine_kwargs)
 
 
-engine: Engine = _build_engine()
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, class_=Session)
+_engine: Engine | None = None
+_SessionLocal: sessionmaker | None = None
+
+
+def get_engine() -> Engine:
+    global _engine
+    if _engine is None:
+        _engine = _build_engine()
+    return _engine
+
+
+def get_session_factory() -> sessionmaker:
+    global _SessionLocal
+    if _SessionLocal is None:
+        _SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=get_engine(), class_=Session)
+    return _SessionLocal
 
 
 def get_db() -> Generator[Session, None, None]:
     """FastAPI dependency yielding a transactional session."""
 
-    db = SessionLocal()
+    db = get_session_factory()()
     try:
         yield db
         db.commit()
@@ -67,7 +81,7 @@ def get_db() -> Generator[Session, None, None]:
 def session_scope() -> Generator[Session, None, None]:
     """Context-manager flavour for background workers / scripts."""
 
-    db = SessionLocal()
+    db = get_session_factory()()
     try:
         yield db
         db.commit()

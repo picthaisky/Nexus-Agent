@@ -67,7 +67,12 @@ class MultiChannelGateway:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"Error processing message in lane {channel}: {str(e)}")
+                logger.error(
+                    f"Error processing message in lane {channel}: {str(e)}",
+                    exc_info=True,
+                    extra={"channel": channel}
+                )
+                self.queue.task_done(channel)
 
     def start_workers(self):
         """Starts asynchronous consumption loops for each channel lane."""

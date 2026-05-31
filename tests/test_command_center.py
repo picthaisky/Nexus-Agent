@@ -55,15 +55,15 @@ class TestObservability:
     def test_estimate_cost_known_model(self):
         # gpt-4o: $0.005 / 1K input, $0.015 / 1K output
         cost = estimate_cost("gpt-4o", 1000, 1000)
-        assert cost == pytest.approx(0.020, rel=1e-3)
+        assert cost.total_usd == pytest.approx(0.020, rel=1e-3)
 
     def test_estimate_cost_unknown_falls_back_to_zero(self):
-        assert estimate_cost("nonexistent-model", 5000, 5000) == 0.0
+        assert estimate_cost("nonexistent-model", 5000, 5000).total_usd == 0.0
 
     def test_estimate_cost_prefix_match(self):
         # Claude variants like ``claude-3-5-sonnet-20240620`` should price-match.
         cost = estimate_cost("claude-3-5-sonnet-20240620", 1000, 0)
-        assert cost == pytest.approx(0.003, rel=1e-3)
+        assert cost.total_usd == pytest.approx(0.003, rel=1e-3)
 
     def test_registry_records_call(self):
         reg = AgentMetricsRegistry()
