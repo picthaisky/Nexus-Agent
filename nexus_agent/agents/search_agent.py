@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any
-from duckduckgo_search import DDGS
+from ddgs import DDGS
 
 from nexus_agent.agents.base import BaseAgent
 from nexus_agent.core.models import AgentRole, AgentspaceSearchResult

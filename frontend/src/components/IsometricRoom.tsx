@@ -12,9 +12,18 @@ interface IsometricRoomProps {
 export function IsometricRoom({ agents, expEffects }: IsometricRoomProps) {
   const phaserRef = useRef<IRefPhaserGame | null>(null);
 
-  // Sync React state to Phaser whenever agents change
+  // Sync React state to Phaser whenever agents change or when scene becomes ready
   useEffect(() => {
     EventBus.emit('update-agents', agents);
+
+    const onSceneReady = () => {
+        EventBus.emit('update-agents', agents);
+    };
+    EventBus.on('current-scene-ready', onSceneReady);
+
+    return () => {
+        EventBus.removeListener('current-scene-ready', onSceneReady);
+    };
   }, [agents]);
 
   // Sync EXP effects to Phaser (if we want to add flying text in Phaser later)
