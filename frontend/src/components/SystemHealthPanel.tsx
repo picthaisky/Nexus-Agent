@@ -20,8 +20,8 @@ export function SystemHealthPanel() {
         const headers: HeadersInit = {};
         if (apiKey) headers["X-API-Key"] = apiKey;
         
-        const res = await fetch("/health", { headers });
-        if (res.ok) {
+        const res = await fetch("/ready", { headers });
+        if (res.ok || res.status === 503) {
           const data = await res.json();
           setHealth(data);
         }
@@ -69,8 +69,8 @@ export function SystemHealthPanel() {
             <Database className="h-4 w-4 text-slate-500" />
             <span>PostgreSQL</span>
           </div>
-          <span className={`font-mono text-xs ${getStatusColor(health.checks.postgres || "unknown")}`}>
-            {health.checks.postgres || "unknown"}
+          <span className={`font-mono text-xs ${getStatusColor(health.checks?.postgres || "unknown")}`}>
+            {health.checks?.postgres || "unknown"}
           </span>
         </div>
         
@@ -79,8 +79,8 @@ export function SystemHealthPanel() {
             <Server className="h-4 w-4 text-slate-500" />
             <span>Redis Cache</span>
           </div>
-          <span className={`font-mono text-xs ${getStatusColor(health.checks.redis || "unknown")}`}>
-            {health.checks.redis || "unknown"}
+          <span className={`font-mono text-xs ${getStatusColor(health.checks?.redis || "unknown")}`}>
+            {health.checks?.redis || "unknown"}
           </span>
         </div>
         
@@ -94,8 +94,8 @@ export function SystemHealthPanel() {
               <Cpu className="h-4 w-4 text-slate-500" />
               <span>{provider.replace('_', ' ')}</span>
             </div>
-            <span className={`font-mono text-xs ${getStatusColor(health.checks[provider] || "missing")}`}>
-              {health.checks[provider] || "missing"}
+            <span className={`font-mono text-xs ${getStatusColor(health.checks?.[provider] || "missing")}`}>
+              {health.checks?.[provider] || "missing"}
             </span>
           </div>
         ))}
