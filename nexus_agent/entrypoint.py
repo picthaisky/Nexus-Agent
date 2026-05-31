@@ -294,7 +294,7 @@ async def readiness_check():
     """Readiness probe — returns 200 only when all configured dependencies are healthy."""
     from sqlalchemy import text  # local import to keep cold-start light
 
-    from nexus_agent.core.database import engine as db_engine
+    from nexus_agent.core.database import get_engine
     from nexus_agent.core.redis_client import ping_redis
 
     checks: dict[str, str] = {}
@@ -303,7 +303,7 @@ async def readiness_check():
     # Postgres
     if settings.database_url:
         try:
-            with db_engine.connect() as conn:
+            with get_engine().connect() as conn:
                 conn.execute(text("SELECT 1"))
             checks["postgres"] = "ok"
         except Exception as exc:
