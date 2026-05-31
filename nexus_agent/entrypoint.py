@@ -10,6 +10,7 @@ import os
 import sys
 import time
 import asyncio
+import logging
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path

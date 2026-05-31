@@ -44,9 +44,6 @@ services:
 
   # ── Cyber-Thai Command Center (React Dashboard) ──────────────
   nexus-dashboard:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
     image: ghcr.io/picthaisky/nexus-agent-frontend:${NEXUS_IMAGE_TAG:-latest}
     container_name: nexus-dashboard
     restart: unless-stopped

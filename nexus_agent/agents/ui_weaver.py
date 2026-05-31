@@ -1,6 +1,5 @@
 import logging
-import json
-from typing import Dict, Any, Callable
+from typing import Dict, Callable
 
 # nexus_agent.core.models needs an AgentRole definition, assumes DEVELOPER or custom UI_WEAVER
 logger = logging.getLogger(__name__)
