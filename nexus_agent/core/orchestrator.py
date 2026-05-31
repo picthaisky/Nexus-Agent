@@ -282,6 +282,15 @@ class Orchestrator:
                         micro_state=micro,
                         status_message=f"Executed node: {node_name}",
                     )
+                    
+                    if "messages" in state_update and state_update["messages"]:
+                        # Extract the last message content
+                        msg = state_update["messages"][-1]
+                        content = msg.get("content", f"Finished {node_name}") if isinstance(msg, dict) else msg.content
+                        dashboard_hub.emit_log_threadsafe(f"[{node_name.upper()}] {content}", agent_id=agent_id, role=role)
+                    else:
+                        dashboard_hub.emit_log_threadsafe(f"Executed node: {node_name}", agent_id=agent_id, role=role)
+                        
             final_state = output
 
         return final_state
