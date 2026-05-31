@@ -1,15 +1,18 @@
-import { useMemo } from "react";
-import { Activity, Cpu, Wifi, WifiOff } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Activity, Cpu, Wifi, WifiOff, LayoutGrid, Box, Sliders } from "lucide-react";
 import { useAgentSocket } from "../hooks/useAgentSocket";
 import { AgentMonitorCell } from "./AgentMonitorCell";
 import { CommandInput } from "./CommandInput";
 import { SystemHealthPanel } from "./SystemHealthPanel";
 import { LiveLogViewer } from "./LiveLogViewer";
+import { IsometricRoom } from "./IsometricRoom";
+import { WorkspacePanel } from "./WorkspacePanel";
 
 const ORDER = ["planner", "architect", "developer", "ui_weaver", "validator", "optimizer"];
 
 export default function Dashboard() {
   const { agents, connected, expEffects, logs } = useAgentSocket();
+  const [viewMode, setViewMode] = useState<"grid" | "isometric" | "workspace">("isometric");
 
   const cells = useMemo(() => {
     return ORDER.map((id) => agents[id]).filter(Boolean);
@@ -29,7 +32,6 @@ export default function Dashboard() {
 
   const handleRunTask = async (goal: string) => {
     const key = (window as unknown as { __NEXUS_API_KEY__?: string | null }).__NEXUS_API_KEY__ || "";
-    // Note: in dev mode, fetch proxy might not prepend /api or might go direct to /tasks/run if configured
     const targetUrl = import.meta.env?.VITE_NEXUS_API_URL ? `${import.meta.env.VITE_NEXUS_API_URL}/tasks/run` : "/tasks/run";
     const res = await fetch(targetUrl, {
       method: "POST",
@@ -58,7 +60,45 @@ export default function Dashboard() {
               <div className="text-[10px] md:text-xs text-slate-400">Nexus-Agent · Multi-AI Trading Office</div>
             </div>
           </div>
+          
           <div className="flex flex-wrap justify-center items-center gap-4 md:gap-6 text-[10px] md:text-xs text-slate-300">
+            {/* View Toggle */}
+            <div className="flex border border-cyber-neon/20 rounded-lg p-0.5 bg-cyber-panel/40">
+              <button
+                onClick={() => setViewMode("isometric")}
+                className={`flex items-center gap-1.5 px-3 py-1 text-[10px] md:text-xs rounded-md transition-all font-mono ${
+                  viewMode === "isometric"
+                    ? "bg-cyber-neon/20 text-cyber-neon border border-cyber-neon/40 shadow-[0_0_10px_rgba(95,225,255,0.25)] font-bold"
+                    : "text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                <Box className="w-3.5 h-3.5" />
+                <span>Isometric Office</span>
+              </button>
+              <button
+                onClick={() => setViewMode("grid")}
+                className={`flex items-center gap-1.5 px-3 py-1 text-[10px] md:text-xs rounded-md transition-all font-mono ${
+                  viewMode === "grid"
+                    ? "bg-cyber-neon/20 text-cyber-neon border border-cyber-neon/40 shadow-[0_0_10px_rgba(95,225,255,0.25)] font-bold"
+                    : "text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                <LayoutGrid className="w-3.5 h-3.5" />
+                <span>Grid View</span>
+              </button>
+              <button
+                onClick={() => setViewMode("workspace")}
+                className={`flex items-center gap-1.5 px-3 py-1 text-[10px] md:text-xs rounded-md transition-all font-mono ${
+                  viewMode === "workspace"
+                    ? "bg-cyber-neon/20 text-cyber-neon border border-cyber-neon/40 shadow-[0_0_10px_rgba(95,225,255,0.25)] font-bold"
+                    : "text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                <Sliders className="w-3.5 h-3.5" />
+                <span>Workspace Config</span>
+              </button>
+            </div>
+
             <div className="flex items-center gap-1">
               <Cpu className="h-3 w-3 md:h-4 md:w-4 text-status-processing shrink-0" />
               <span className="font-mono">{cells.length} agents</span>
@@ -84,18 +124,22 @@ export default function Dashboard() {
           <SystemHealthPanel />
         </aside>
 
-        {/* Center Grid: Agents */}
+        {/* Center Section: Agents/Isometric/Workspace */}
         <section className="flex-1 overflow-visible lg:overflow-y-auto min-w-0 pr-0 lg:pr-2 order-1 lg:order-2">
           {cells.length === 0 ? (
             <div className="rounded-2xl border border-cyber-neon/20 bg-cyber-panel/50 p-6 md:p-12 text-center text-slate-400 text-sm md:text-base">
               Waiting for agent telemetry…
             </div>
-          ) : (
+          ) : viewMode === "isometric" ? (
+            <IsometricRoom agents={agents} expEffects={expEffects} />
+          ) : viewMode === "grid" ? (
             <div className="grid grid-cols-1 gap-4 md:gap-6 sm:grid-cols-2 xl:grid-cols-3">
               {cells.map((a) => (
                 <AgentMonitorCell key={a.agent_id} agent={a} expFx={fxByAgent[a.agent_id]} />
               ))}
             </div>
+          ) : (
+            <WorkspacePanel />
           )}
         </section>
 

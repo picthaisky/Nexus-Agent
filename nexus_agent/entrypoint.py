@@ -253,11 +253,40 @@ class AutonomousPlanRequest(BaseModel):
     top_k: int = Field(default=5, ge=1, le=20)
 
 
+class ConnectRepoRequest(BaseModel):
+    repo_url: str
+    branch: str = "main"
+
+
+class RosterAddRequest(BaseModel):
+    agent_id: str
+    role: str
+    display_name: str
+
+
+class RosterUpdateRequest(BaseModel):
+    agent_id: str
+    display_name: str
+
+
+class ArchiveDocRequest(BaseModel):
+    filename: str
+    title: str
+    content: str
+
+
+ACTIVE_REPO_INFO = {
+    "repo_url": "",
+    "branch": "main",
+    "local_path": DEFAULT_REPO_ROOT,
+    "status": "local"
+}
+
 
 def _resolve_repo_root(repo_root: str | None) -> str:
     if repo_root and repo_root.strip():
         return str(Path(repo_root).resolve())
-    return str(Path(DEFAULT_REPO_ROOT).resolve())
+    return str(Path(ACTIVE_REPO_INFO["local_path"]).resolve())
 
 
 def _ensure_graph(repo_root: str | None, include_tests: bool = True) -> RepoGraph:
@@ -704,6 +733,255 @@ async def ws_dashboard(
         pass
     finally:
         await dashboard_hub.disconnect(websocket)
+
+
+# -- Workspace Settings & Config APIs ----------------------------------------
+
+@app.post("/repo/connect", tags=["repo"])
+async def connect_repo(request: ConnectRepoRequest):
+    """Clone or connect a GitHub repository and rebuild the Knowledge Graph."""
+    import shutil
+    import subprocess
+    import re
+    import hashlib
+    from pathlib import Path
+    global KG_CACHE
+    global KG_CACHE_ROOT
+
+    url = request.repo_url.strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="Repository URL must not be empty")
+
+    # Derive a local folder name in the repos directory
+    suffix = url.rstrip("/").split("/")[-1]
+    suffix = suffix[:-4] if suffix.endswith(".git") else suffix
+    safe_name = re.sub(r"[^A-Za-z0-9._-]+", "-", suffix).strip("-") or "repo"
+    
+    repos_dir = Path("repos").resolve()
+    repos_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Add a digest to avoid collisions
+    digest = hashlib.sha1(url.encode("utf-8")).hexdigest()[:8]
+    local_path = repos_dir / f"{safe_name}-{digest}"
+
+    git_binary = shutil.which("git")
+    if not git_binary:
+        raise HTTPException(status_code=500, detail="Git binary not found on the server path")
+
+    try:
+        if local_path.exists() and (local_path / ".git").exists():
+            # Repo exists: fetch and pull/checkout
+            subprocess.run([git_binary, "-C", str(local_path), "fetch", "--all"], check=True, capture_output=True)
+            subprocess.run([git_binary, "-C", str(local_path), "checkout", request.branch], check=True, capture_output=True)
+            subprocess.run([git_binary, "-C", str(local_path), "pull", "origin", request.branch], check=True, capture_output=True)
+        else:
+            # Clone it
+            if local_path.exists():
+                shutil.rmtree(local_path)
+            subprocess.run([git_binary, "clone", "--depth", "1", "--branch", request.branch, url, str(local_path)], check=True, capture_output=True)
+    except subprocess.CalledProcessError as exc:
+        err = exc.stderr.decode("utf-8", errors="replace").strip()
+        raise HTTPException(status_code=400, detail=f"Git operation failed: {err}")
+
+    # Update active repo state
+    ACTIVE_REPO_INFO["repo_url"] = url
+    ACTIVE_REPO_INFO["branch"] = request.branch
+    ACTIVE_REPO_INFO["local_path"] = str(local_path)
+    ACTIVE_REPO_INFO["status"] = "connected"
+
+    # Build the Knowledge Graph on the newly connected repo
+    try:
+        graph = _ensure_graph(repo_root=str(local_path), include_tests=True)
+        summary = graph.summary()
+    except Exception as exc:
+        summary = {"error": f"Failed to build KG: {str(exc)}"}
+
+    return {
+        "status": "connected",
+        "repo_url": url,
+        "branch": request.branch,
+        "local_path": str(local_path),
+        "graph_summary": summary
+    }
+
+
+@app.get("/repo/active", tags=["repo"])
+async def get_active_repo():
+    """Returns details of the currently active repository."""
+    return ACTIVE_REPO_INFO
+
+
+@app.get("/skills", tags=["skills"])
+async def list_skills():
+    """List all skills in the persistent vault."""
+    try:
+        skills = skill_vault.list_skills(limit=250)
+        return {"skills": [asdict(s) for s in skills]}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.delete("/skills/{skill_id}", tags=["skills"])
+async def delete_skill_endpoint(skill_id: str):
+    """Delete a skill from the persistent vault by ID."""
+    try:
+        skill_vault.delete_skill(skill_id)
+        return {"status": "deleted", "skill_id": skill_id}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/dashboard/roster", tags=["dashboard"])
+async def get_roster():
+    """Returns all agents registered in the dashboard roster."""
+    return {
+        "agents": [s.model_dump(mode="json") for s in dashboard_hub._states.values()]
+    }
+
+
+@app.post("/dashboard/roster/add", tags=["dashboard"])
+async def add_roster_agent(request: RosterAddRequest):
+    """Dynamically register a new agent in the dashboard roster."""
+    from nexus_agent.core.models import AgentRole
+    try:
+        # Find matching role enum
+        role_enum = None
+        for r in AgentRole:
+            if r.value == request.role:
+                role_enum = r
+                break
+        if role_enum is None:
+            role_enum = AgentRole.DEVELOPER
+        
+        await dashboard_hub.add_agent(
+            agent_id=request.agent_id.strip(),
+            role=role_enum,
+            display_name=request.display_name.strip()
+        )
+        return {"status": "ok", "agent_id": request.agent_id}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/dashboard/roster/update", tags=["dashboard"])
+async def update_roster_agent(request: RosterUpdateRequest):
+    """Update display details of an agent in the dashboard roster."""
+    try:
+        await dashboard_hub.update_agent(
+            agent_id=request.agent_id.strip(),
+            display_name=request.display_name.strip()
+        )
+        return {"status": "ok", "agent_id": request.agent_id}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.delete("/dashboard/roster/{agent_id}", tags=["dashboard"])
+async def delete_roster_agent(agent_id: str):
+    """Remove an agent from the dashboard roster."""
+    try:
+        await dashboard_hub.delete_agent(agent_id)
+        return {"status": "deleted", "agent_id": agent_id}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/docs/archive", tags=["docs"])
+async def archive_doc(request: ArchiveDocRequest):
+    """Saves a Markdown document inside docs/archive/."""
+    from pathlib import Path
+    filename = request.filename.strip()
+    if not filename.endswith(".md"):
+        filename += ".md"
+    
+    archive_dir = Path("docs/archive").resolve()
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    
+    filepath = archive_dir / filename
+    try:
+        content = request.content
+        if not content.startswith("#"):
+            content = f"# {request.title}\n\n{content}"
+        
+        filepath.write_text(content, encoding="utf-8")
+        return {
+            "status": "archived",
+            "filename": filename,
+            "path": str(filepath)
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/docs/archive", tags=["docs"])
+async def list_archived_docs():
+    """Lists all archived Markdown documents in the system."""
+    from pathlib import Path
+    archive_dir = Path("docs/archive").resolve()
+    if not archive_dir.exists() or not archive_dir.is_dir():
+        return {"documents": []}
+    
+    docs = []
+    for f in archive_dir.glob("*.md"):
+        try:
+            content = f.read_text(encoding="utf-8")
+            title = f.stem.replace("-", " ").replace("_", " ").title()
+            for line in content.splitlines():
+                if line.strip().startswith("#"):
+                    title = line.lstrip("#").strip()
+                    break
+            
+            stat = f.stat()
+            docs.append({
+                "filename": f.name,
+                "title": title,
+                "size_bytes": stat.st_size,
+                "modified_at": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat()
+            })
+        except Exception:
+            pass
+    return {"documents": docs}
+
+
+@app.get("/docs/archive/{filename}", tags=["docs"])
+async def get_archived_doc(filename: str):
+    """Retrieves the title and content of an archived Markdown document."""
+    from pathlib import Path
+    archive_dir = Path("docs/archive").resolve()
+    filepath = archive_dir / filename
+    if not filepath.exists() or not filepath.is_file():
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    try:
+        content = filepath.read_text(encoding="utf-8")
+        title = filepath.stem.replace("-", " ").replace("_", " ").title()
+        for line in content.splitlines():
+            if line.strip().startswith("#"):
+                title = line.lstrip("#").strip()
+                break
+        return {
+            "filename": filename,
+            "title": title,
+            "content": content
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.delete("/docs/archive/{filename}", tags=["docs"])
+async def delete_archived_doc(filename: str):
+    """Deletes an archived Markdown document."""
+    from pathlib import Path
+    archive_dir = Path("docs/archive").resolve()
+    filepath = archive_dir / filename
+    if not filepath.exists() or not filepath.is_file():
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    try:
+        filepath.unlink()
+        return {"status": "deleted", "filename": filename}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 # -- Orchestrator API --------------------------------------------------------

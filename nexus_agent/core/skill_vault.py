@@ -614,6 +614,13 @@ class SkillVault:
             ).fetchall()
         return [row["instruction"] for row in rows]
 
+    def delete_skill(self, skill_id: str) -> None:
+        """Deletes a skill by its skill_id, removing its steps and FTS entries."""
+        with self._connect() as conn:
+            conn.execute("DELETE FROM skills WHERE skill_id = ?", (skill_id,))
+            conn.execute("DELETE FROM skill_steps WHERE skill_id = ?", (skill_id,))
+            conn.execute("DELETE FROM skills_fts WHERE skill_id = ?", (skill_id,))
+
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
