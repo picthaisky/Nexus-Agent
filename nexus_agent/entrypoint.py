@@ -109,9 +109,11 @@ if settings.is_production and ALLOWED_ORIGINS == ["*"]:
         "CORS_ORIGINS='*' in production; set an allow-list of trusted origins.",
         stacklevel=2,
     )
+is_wildcard = "*" in ALLOWED_ORIGINS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
+    allow_origins=ALLOWED_ORIGINS if not is_wildcard else [],
+    allow_origin_regex=r".*" if is_wildcard else None,
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "X-API-Key", "X-Request-ID"],
