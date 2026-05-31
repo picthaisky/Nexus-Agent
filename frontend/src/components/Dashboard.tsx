@@ -48,19 +48,19 @@ export default function Dashboard() {
     <div className="flex flex-col h-screen overflow-hidden bg-cyber-bg text-slate-300">
       {/* Top bar */}
       <header className="flex-none z-10 border-b border-cyber-neon/20 bg-cyber-bg/80 backdrop-blur">
-        <div className="mx-auto flex max-w-[1600px] items-center justify-between px-6 py-3">
+        <div className="mx-auto flex flex-col md:flex-row max-w-[1600px] items-center justify-between px-4 py-3 gap-3">
           <div className="flex items-center gap-3">
-            <Activity className="h-6 w-6 text-cyber-gold" />
-            <div>
-              <div className="text-sm uppercase tracking-[0.3em] text-cyber-neon/80">
+            <Activity className="h-5 w-5 md:h-6 md:w-6 text-cyber-gold shrink-0" />
+            <div className="text-center md:text-left">
+              <div className="text-xs md:text-sm uppercase tracking-[0.1em] sm:tracking-[0.2em] md:tracking-[0.3em] text-cyber-neon/80">
                 Cyber-Thai Command Center
               </div>
-              <div className="text-xs text-slate-400">Nexus-Agent · Multi-AI Trading Office</div>
+              <div className="text-[10px] md:text-xs text-slate-400">Nexus-Agent · Multi-AI Trading Office</div>
             </div>
           </div>
-          <div className="flex items-center gap-6 text-xs text-slate-300">
+          <div className="flex flex-wrap justify-center items-center gap-4 md:gap-6 text-[10px] md:text-xs text-slate-300">
             <div className="flex items-center gap-1">
-              <Cpu className="h-4 w-4 text-status-processing" />
+              <Cpu className="h-3 w-3 md:h-4 md:w-4 text-status-processing shrink-0" />
               <span className="font-mono">{cells.length} agents</span>
             </div>
             <div className="font-mono">EXP {totalExp}</div>
@@ -70,7 +70,7 @@ export default function Dashboard() {
                 connected ? "text-status-success" : "text-status-error"
               }`}
             >
-              {connected ? <Wifi className="h-4 w-4" /> : <WifiOff className="h-4 w-4" />}
+              {connected ? <Wifi className="h-3 w-3 md:h-4 md:w-4 shrink-0" /> : <WifiOff className="h-3 w-3 md:h-4 md:w-4 shrink-0" />}
               <span>{connected ? "LIVE" : "OFFLINE"}</span>
             </div>
           </div>
@@ -78,20 +78,20 @@ export default function Dashboard() {
       </header>
 
       {/* Main Content Area */}
-      <main className="flex-1 flex overflow-hidden mx-auto w-full max-w-[1600px] px-6 py-6 gap-6">
+      <main className="flex-1 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden mx-auto w-full max-w-[1600px] px-4 py-4 lg:px-6 lg:py-6 gap-6">
         {/* Left Sidebar: Health */}
-        <aside className="w-64 flex-none hidden lg:block">
+        <aside className="w-full lg:w-64 flex-none order-2 lg:order-1">
           <SystemHealthPanel />
         </aside>
 
         {/* Center Grid: Agents */}
-        <section className="flex-1 overflow-y-auto min-w-0 pr-2">
+        <section className="flex-1 overflow-visible lg:overflow-y-auto min-w-0 pr-0 lg:pr-2 order-1 lg:order-2">
           {cells.length === 0 ? (
-            <div className="rounded-2xl border border-cyber-neon/20 bg-cyber-panel/50 p-12 text-center text-slate-400">
+            <div className="rounded-2xl border border-cyber-neon/20 bg-cyber-panel/50 p-6 md:p-12 text-center text-slate-400 text-sm md:text-base">
               Waiting for agent telemetry…
             </div>
           ) : (
-            <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
+            <div className="grid grid-cols-1 gap-4 md:gap-6 sm:grid-cols-2 xl:grid-cols-3">
               {cells.map((a) => (
                 <AgentMonitorCell key={a.agent_id} agent={a} expFx={fxByAgent[a.agent_id]} />
               ))}
@@ -100,7 +100,7 @@ export default function Dashboard() {
         </section>
 
         {/* Right Sidebar: Logs */}
-        <aside className="w-80 flex-none hidden xl:block">
+        <aside className="w-full h-80 lg:h-auto lg:w-80 flex-none order-3 lg:order-3">
           <LiveLogViewer logs={logs} />
         </aside>
       </main>

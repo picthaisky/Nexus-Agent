@@ -4,10 +4,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from nexus_agent.core.state import AgentState
 from nexus_agent.core.memory import ProceduralMemory
 
-try:
-    from langchain_openai import ChatOpenAI
-except ModuleNotFoundError:  # pragma: no cover - exercised in dependency-light environments
-    ChatOpenAI = None
+from nexus_agent.core.inference import InferenceEngine, InferenceConfig
 
 class PlannerAgent:
     """
@@ -16,23 +13,10 @@ class PlannerAgent:
     """
     def __init__(self, procedural_memory: ProceduralMemory):
         self.memory = procedural_memory
-        self.llm = self._build_llm()
-        
-        self.prompt = ChatPromptTemplate.from_messages([
-            ("system", "You are an AI Planner. Break down the user's Goal into a discrete list of actionable steps.\n"
-                       "You have access to the following known Skills/Best Practices which may help you format your plan:\n"
-                       "{skills_context}\n\n"
-                       "Output ONLY a JSON array of strings representing the steps. Example: [\"step 1\", \"step 2\"]"),
-            ("user", "Goal: {goal}")
-        ])
-
-    def _build_llm(self):
-        if ChatOpenAI is None:
-            return None
         try:
-            return ChatOpenAI(model="gpt-4o", temperature=0.2)
+            self.engine = InferenceEngine(InferenceConfig())
         except Exception:
-            return None
+            self.engine = None
     
     def run(self, state: AgentState) -> dict[str, Any]:
         goal = state.get("goal", "")
@@ -56,7 +40,7 @@ class PlannerAgent:
                 
             skills_context = "\n\n".join(context_blocks)
 
-        if self.llm is None:
+        if self.engine is None or not getattr(self.engine, "_adapters", True):
             plan = [f"Attempt to solve: {goal}"] if goal else ["Clarify goal and gather requirements"]
             return {
                 "plan": plan,
@@ -64,19 +48,28 @@ class PlannerAgent:
                 "used_rule_ids": used_rule_ids,
                 "messages": [{
                     "role": "planner",
-                    "content": "Fallback plan used because LLM is unavailable in this environment.",
+                    "content": "Fallback plan used because LLM engine is unavailable in this environment.",
                 }],
             }
             
         # 2. Generate Plan using LLM
         try:
-            chain = self.prompt | self.llm
-            response = chain.invoke({
-                "skills_context": skills_context,
-                "goal": goal
-            })
+            system_prompt = (
+                "You are an AI Planner. Break down the user's Goal into a discrete list of actionable steps.\n"
+                "You have access to the following known Skills/Best Practices which may help you format your plan:\n"
+                f"{skills_context}\n\n"
+                "Output ONLY a JSON array of strings representing the steps. Example: [\"step 1\", \"step 2\"]"
+            )
             
-            content = response.content
+            resp = self.engine.generate_detailed(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": f"Goal: {goal}"}
+                ],
+                temperature=0.2
+            )
+            
+            content = resp.content
             if "```json" in content:
                 content = content.split("```json")[1].split("```")[0].strip()
             elif "```" in content:
