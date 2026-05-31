@@ -7,8 +7,11 @@ including the Learner node for automatic skill extraction.
 from __future__ import annotations
 
 import json
+import logging
 from langgraph.graph import StateGraph, END
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 from typing import Any, Callable, Dict, TypeVar
 
 from nexus_agent.core.state import AgentState
@@ -242,6 +245,12 @@ class Orchestrator:
         status = state.get("validation_status", "failed")
         if status == "success":
             return "end"
+
+        # Guard against infinite loops
+        actions = state.get("actions_taken", [])
+        if len(actions) > 5:  # Maximum 5 iterations
+            return "end"
+
         return "continue"
 
     def run_task(self, goal: str) -> Dict[str, Any]:
@@ -263,7 +272,7 @@ class Orchestrator:
         for output in self.graph.stream(initial_state):
             # We log state transitions here
             for node_name, state_update in output.items():
-                print(f"--- Node Executed: {node_name} ---")
+                logger.info("node_executed", extra={"node": node_name})
                 mapping = getattr(self, "_node_to_agent", {}).get(node_name)
                 if mapping:
                     agent_id, role, micro = mapping

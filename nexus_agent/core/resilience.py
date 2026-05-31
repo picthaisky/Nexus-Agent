@@ -38,10 +38,10 @@ class TransientError(Exception):
 
 
 def _retryable(exc: BaseException) -> bool:
-    if isinstance(exc, TransientError):
+    if isinstance(exc, (TransientError, TimeoutError, ConnectionError, OSError)):
         return True
     name = exc.__class__.__name__.lower()
-    return any(token in name for token in ("timeout", "connection", "rate", "temporary"))
+    return "timeout" in name or "connection" in name
 
 
 def get_breaker(name: str) -> pybreaker.CircuitBreaker:
@@ -71,7 +71,7 @@ def resilient_call(
 
     @retry(
         reraise=True,
-        retry=retry_if_exception_type(Exception) & retry_if_exception_type(  # noqa: W504
+        retry=retry_if_exception_type(
             (TransientError, TimeoutError, ConnectionError, OSError)
         ),
         stop=stop_after_attempt(max(1, settings.inference_max_retries)),

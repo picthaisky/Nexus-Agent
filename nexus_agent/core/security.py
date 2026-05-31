@@ -16,7 +16,7 @@ import hmac
 import logging
 from typing import Optional
 
-from fastapi import Depends, Header, HTTPException, Query, WebSocket, status
+from fastapi import Depends, Header, HTTPException, Query, WebSocket, WebSocketDisconnect, status
 
 from nexus_agent.core.settings import Settings, get_settings
 
@@ -104,8 +104,5 @@ async def verify_ws_token(websocket: WebSocket, token: Optional[str] = Query(def
     )
     if not expected or not token or not hmac.compare_digest(token, expected):
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid WebSocket token.",
-        )
+        raise WebSocketDisconnect(code=status.WS_1008_POLICY_VIOLATION)
     return Principal(role="viewer")

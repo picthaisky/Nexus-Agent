@@ -52,7 +52,7 @@ def test_database_engine_falls_back_to_sqlite(monkeypatch, tmp_path):
     importlib.reload(database_module)
     from sqlalchemy import text
 
-    with database_module.engine.connect() as conn:
+    with database_module.get_engine().connect() as conn:
         assert conn.execute(text("SELECT 1")).scalar() == 1
 
 
