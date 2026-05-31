@@ -227,6 +227,26 @@ class DashboardHub:
         except RuntimeError as exc:
             logger.debug("Cannot schedule emit_state: %s", exc)
 
+    async def emit_log(self, message: str, agent_id: str = "system", role: Optional[AgentRole] = None) -> None:
+        """Emit a detailed log message to the dashboard."""
+        event = DashboardEvent(
+            event="log",
+            agent_id=agent_id,
+            role=role or AgentRole.PLANNER,  # Default fallback
+            micro_state=AgentMicroState.IDLE,
+            status_message=message,
+        )
+        await self.broadcast(event.model_dump(mode="json"))
+
+    def emit_log_threadsafe(self, message: str, agent_id: str = "system", role: Optional[AgentRole] = None) -> None:
+        """Thread-safe wrapper for emitting logs."""
+        if self._loop is None or not self._loop.is_running():
+            return
+        try:
+            asyncio.run_coroutine_threadsafe(self.emit_log(message, agent_id, role), self._loop)
+        except RuntimeError as exc:
+            logger.debug("Cannot schedule emit_log: %s", exc)
+
 
 # Module-level singleton
 dashboard_hub = DashboardHub()

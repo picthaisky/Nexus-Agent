@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -150,6 +150,10 @@ app.add_middleware(
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "X-API-Key", "X-Request-ID"],
 )
+
+
+class RunTaskRequest(BaseModel):
+    goal: str
 
 
 class BuildGraphRequest(BaseModel):
@@ -700,3 +704,32 @@ async def ws_dashboard(
         pass
     finally:
         await dashboard_hub.disconnect(websocket)
+
+
+# -- Orchestrator API --------------------------------------------------------
+
+def _run_orchestrator(goal: str):
+    """Synchronous background runner for the LangGraph Orchestrator."""
+    from nexus_agent.core.orchestrator import Orchestrator
+    logger_ = logging.getLogger("nexus.orchestrator.runner")
+    dashboard_hub.emit_log_threadsafe(f"Task initiated: {goal}", agent_id="system")
+    try:
+        orch = Orchestrator()
+        logger_.info(f"Starting background orchestrator for goal: {goal}")
+        orch.run_task(goal)
+        logger_.info("Orchestrator finished task successfully.")
+        dashboard_hub.emit_log_threadsafe("Task completed successfully.", agent_id="system")
+    except Exception as exc:
+        logger_.error(f"Orchestrator failed: {exc}", exc_info=True)
+        dashboard_hub.emit_log_threadsafe(f"Task failed: {exc}", agent_id="system")
+
+
+@app.post("/tasks/run", tags=["orchestrator"])
+async def run_task(
+    request: RunTaskRequest,
+    background_tasks: BackgroundTasks,
+    _: Principal = Depends(require_api_key),
+):
+    """Submits a task to the Orchestrator for background execution."""
+    background_tasks.add_task(_run_orchestrator, request.goal)
+    return {"status": "accepted", "goal": request.goal}

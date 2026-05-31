@@ -35,6 +35,7 @@ export interface UseAgentSocketResult {
   lastEvent: DashboardEvent | null;
   expEffects: ExpFx[];
   consumeExp: (id: number) => void;
+  logs: DashboardEvent[];
 }
 
 /**
@@ -47,6 +48,7 @@ export function useAgentSocket(url: string = DEFAULT_WS_URL): UseAgentSocketResu
   const [connected, setConnected] = useState(false);
   const [lastEvent, setLastEvent] = useState<DashboardEvent | null>(null);
   const [expEffects, setExpEffects] = useState<ExpFx[]>([]);
+  const [logs, setLogs] = useState<DashboardEvent[]>([]);
   const wsRef = useRef<WebSocket | null>(null);
   const fxIdRef = useRef(0);
 
@@ -114,6 +116,10 @@ export function useAgentSocket(url: string = DEFAULT_WS_URL): UseAgentSocketResu
               window.setTimeout(() => consumeExp(id), 1500);
             }
           }
+
+          if (ev.event === "log") {
+            setLogs((prev) => [ev, ...prev].slice(0, 100)); // Keep last 100 logs
+          }
         } catch {
           // Ignore malformed payloads.
         }
@@ -127,5 +133,5 @@ export function useAgentSocket(url: string = DEFAULT_WS_URL): UseAgentSocketResu
     };
   }, [url, consumeExp]);
 
-  return { agents, connected, lastEvent, expEffects, consumeExp };
+  return { agents, connected, lastEvent, expEffects, consumeExp, logs };
 }
