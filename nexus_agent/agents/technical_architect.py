@@ -8,7 +8,6 @@ failure modes have been identified.
 
 from __future__ import annotations
 
-import json
 import pathlib
 from typing import Any
 
