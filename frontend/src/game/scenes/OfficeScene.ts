@@ -1,6 +1,7 @@
 import { Scene } from 'phaser';
 import { EventBus } from '../EventBus';
 import type { AgentRuntimeState, MicroState } from '../../types';
+import { ExpFx } from '../../hooks/useAgentSocket';
 
 interface IsometricPosition {
     x: number;
@@ -69,6 +70,10 @@ export class OfficeScene extends Scene {
             this.syncAgents(agents);
         });
 
+        EventBus.on('exp-effects', (expEffects: ExpFx[]) => {
+            this.spawnExpEffects(expEffects);
+        });
+
         EventBus.emit('current-scene-ready', this);
     }
 
@@ -87,6 +92,8 @@ export class OfficeScene extends Scene {
         for (let x = 0; x < this.gridWidth; x++) {
             for (let y = 0; y < this.gridHeight; y++) {
                 const iso = this.cartToIso(x, y);
+                
+                // Floor tile
                 floor.fillStyle(0x0f1626, 0.8);
                 floor.beginPath();
                 floor.moveTo(iso.x, iso.y - this.tileHeight / 2);
@@ -96,8 +103,49 @@ export class OfficeScene extends Scene {
                 floor.closePath();
                 floor.fillPath();
                 floor.strokePath();
+
+                // Draw some procedural desks at specific intervals
+                if (x % 3 === 2 && y % 3 === 2) {
+                    this.drawIsometricDesk(iso.x, iso.y);
+                }
             }
         }
+    }
+
+    private drawIsometricDesk(isoX: number, isoY: number) {
+        const desk = this.add.graphics();
+        desk.setDepth(isoY - 1); // Desks are slightly behind the agent standing there
+
+        const w = 40;
+        const h = 20; // depth
+        const z = 15; // height
+        
+        // Desk top
+        desk.fillStyle(0x1a243d, 1);
+        desk.beginPath();
+        desk.moveTo(isoX, isoY - z - h);
+        desk.lineTo(isoX + w, isoY - z);
+        desk.lineTo(isoX, isoY - z + h);
+        desk.lineTo(isoX - w, isoY - z);
+        desk.fillPath();
+        
+        // Desk left side
+        desk.fillStyle(0x131b2e, 1);
+        desk.beginPath();
+        desk.moveTo(isoX - w, isoY - z);
+        desk.lineTo(isoX, isoY - z + h);
+        desk.lineTo(isoX, isoY + h);
+        desk.lineTo(isoX - w, isoY);
+        desk.fillPath();
+
+        // Desk right side
+        desk.fillStyle(0x233152, 1);
+        desk.beginPath();
+        desk.moveTo(isoX, isoY - z + h);
+        desk.lineTo(isoX + w, isoY - z);
+        desk.lineTo(isoX + w, isoY);
+        desk.lineTo(isoX, isoY + h);
+        desk.fillPath();
     }
 
     private getMicroStateColor(state: MicroState): number {
@@ -223,6 +271,33 @@ export class OfficeScene extends Scene {
             }
 
             index++;
+        }
+    }
+
+    private spawnExpEffects(expEffects: ExpFx[]) {
+        for (const fx of expEffects) {
+            const spriteData = this.agentSprites.get(fx.agent_id);
+            if (!spriteData) continue;
+
+            const text = this.add.text(spriteData.targetPos.isoX, spriteData.targetPos.isoY - 60, `+${fx.delta} EXP`, {
+                fontFamily: 'sans-serif',
+                fontSize: '14px',
+                fontStyle: 'bold',
+                color: '#5fe1ff',
+                stroke: '#000000',
+                strokeThickness: 3
+            }).setOrigin(0.5);
+
+            text.setDepth(spriteData.targetPos.isoY + 100); // Always on top
+
+            this.tweens.add({
+                targets: text,
+                y: spriteData.targetPos.isoY - 100,
+                alpha: 0,
+                duration: 1500,
+                ease: 'Power2',
+                onComplete: () => text.destroy()
+            });
         }
     }
 
