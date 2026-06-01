@@ -33,7 +33,7 @@ LABEL org.opencontainers.image.description="Nexus-Agent: Multi-AI Agent Orchestr
 
 # Install runtime dependencies only
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends curl tini && \
+    apt-get install -y --no-install-recommends curl tini git && \
     rm -rf /var/lib/apt/lists/*
 
 # Create non-root user

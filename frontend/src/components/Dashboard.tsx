@@ -149,7 +149,7 @@ export default function Dashboard() {
         </aside>
 
         {/* Center Section: Agents/Isometric/Workspace */}
-        <section className="flex-1 overflow-visible lg:overflow-y-auto min-w-0 pr-0 lg:pr-2 order-1 lg:order-2">
+        <section className="flex-1 overflow-visible min-w-0 pr-0 lg:pr-2 order-1 lg:order-2">
           {cells.length === 0 ? (
             <div className="rounded-2xl border border-cyber-neon/20 bg-cyber-panel/50 p-6 md:p-12 text-center text-slate-400 text-sm md:text-base">
               Waiting for agent telemetry…

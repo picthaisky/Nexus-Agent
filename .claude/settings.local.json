@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx tsc *)",
+      "Bash(npm run *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5174)",
+      "Bash(node -e ' *)",
+      "Bash(where puppeteer *)",
+      "Bash(npx playwright *)",
+      "Bash(npx --yes playwright install chromium)",
+      "Read(//c/Users/supachai.nil/AppData/Local/Temp/**)",
+      "Bash(npm list *)",
+      "Bash(node -e \"require.resolve\\('playwright'\\)\")",
+      "Bash(mkdir -p /tmp/pw_tmp)",
+      "Read(//tmp/**)",
+      "Bash(npm init *)",
+      "Bash(npm install *)"
+    ]
+  }
+}
