@@ -1,5 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { GitBranch, BookOpen, UserPlus, FileText, Trash2, Edit2, Plus, ArrowRight, CheckCircle, AlertCircle, RefreshCw, Zap, GitFork, History, ChevronDown, ChevronRight } from "lucide-react";
+import type { AgentRuntimeState } from "../types";
+import { microStyle } from "../utils/microStyle";
 
 interface TaskRun {
   task_id: string;
@@ -50,8 +52,15 @@ interface ArchivedDoc {
   modified_at: string;
 }
 
-export function WorkspacePanel() {
+const AGENT_ORDER = ["planner", "architect", "developer", "ui_weaver", "validator", "optimizer"];
+
+interface WorkspacePanelProps {
+  agents?: Record<string, AgentRuntimeState>;
+}
+
+export function WorkspacePanel({ agents = {} }: WorkspacePanelProps) {
   const [activeTab, setActiveTab] = useState<"git" | "skills" | "roster" | "docs" | "tasks">("git");
+  const pollRef = useRef<number | undefined>(undefined);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ text: string; type: "success" | "error" } | null>(null);
 
@@ -201,6 +210,20 @@ export function WorkspacePanel() {
     fetchTasks(signal);
     return () => controller.abort();
   }, [activeTab]);
+
+  // Auto-poll tasks every 2 s while any task is running
+  useEffect(() => {
+    const hasRunning = taskRuns.some((t) => t.status === "running" || t.status === "queued");
+    if (hasRunning && activeTab === "tasks") {
+      pollRef.current = window.setInterval(() => fetchTasks(), 2000);
+    }
+    return () => {
+      if (pollRef.current !== undefined) {
+        window.clearInterval(pollRef.current);
+        pollRef.current = undefined;
+      }
+    };
+  }, [taskRuns, activeTab]);
 
   const showMsg = (text: string, type: "success" | "error") => {
     setMessage({ text, type });
@@ -1107,6 +1130,48 @@ export function WorkspacePanel() {
                 <RefreshCw aria-hidden="true" className="w-3.5 h-3.5" />
               </button>
             </div>
+
+            {/* Agent Activity Monitor */}
+            {AGENT_ORDER.some((id) => agents[id] && agents[id].current_micro_state !== "idle") && (
+              <div className="flex-none bg-black/30 border border-cyber-neon/15 rounded-xl p-3">
+                <div className="text-[9px] uppercase tracking-widest text-cyber-neon/60 font-mono mb-2 flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-cyber-neon animate-pulse inline-block" />
+                  Agent Activity
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                  {AGENT_ORDER.map((id) => {
+                    const a = agents[id];
+                    if (!a) return null;
+                    const isActive = a.current_micro_state !== "idle";
+                    const s = microStyle(a.current_micro_state);
+                    return (
+                      <div
+                        key={id}
+                        className={`flex flex-col gap-0.5 px-2.5 py-1.5 rounded-lg border font-mono transition-all ${
+                          isActive
+                            ? "border-cyber-neon/30 bg-cyber-neon/5"
+                            : "border-slate-800/60 bg-black/10 opacity-40"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="text-[10px] text-slate-200 truncate font-semibold">
+                            {a.display_name.split(" / ")[0]}
+                          </span>
+                          <span className={`text-[8px] px-1 py-0.5 rounded font-bold flex-none ${s.badge}`}>
+                            {s.label}
+                          </span>
+                        </div>
+                        {isActive && a.status_message && (
+                          <span className="text-[9px] text-cyber-neon/70 truncate leading-tight">
+                            {a.status_message}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {taskRuns.length === 0 ? (
               <div className="flex-1 flex items-center justify-center text-slate-600 font-mono text-xs italic">

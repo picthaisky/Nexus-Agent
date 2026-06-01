@@ -183,7 +183,7 @@ export default function Dashboard() {
             </ErrorBoundary>
           ) : viewMode === "workspace" ? (
             <ErrorBoundary>
-              <WorkspacePanel />
+              <WorkspacePanel agents={agents} />
             </ErrorBoundary>
           ) : viewMode === "agentspace" ? (
             <ErrorBoundary>
