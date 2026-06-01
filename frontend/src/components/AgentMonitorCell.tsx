@@ -54,15 +54,15 @@ export function AgentMonitorCell({ agent, expFx }: Props) {
       <div className="grid grid-cols-3 gap-2 border-t border-cyber-neon/10 px-4 py-2 text-[11px] text-slate-300">
         <div>
           <div className="text-cyber-neon/70">EXP</div>
-          <div className="font-mono">{agent.exp_points}</div>
+          <div className="font-mono">{agent.exp_points ?? 0}</div>
         </div>
         <div>
           <div className="text-cyber-neon/70">Time</div>
-          <div className="font-mono">{agent.metrics.processing_time_ms?.toFixed(0) || 0} ms</div>
+          <div className="font-mono">{(agent.metrics?.processing_time_ms ?? 0).toFixed(0)} ms</div>
         </div>
         <div>
           <div className="text-cyber-neon/70">Cost</div>
-          <div className="font-mono">${agent.metrics.cost_usd?.toFixed(4) || "0.0000"}</div>
+          <div className="font-mono">${(agent.metrics?.cost_usd ?? 0).toFixed(4)}</div>
         </div>
       </div>
 

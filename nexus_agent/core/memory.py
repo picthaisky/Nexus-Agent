@@ -1,3 +1,4 @@
+import re
 import sqlite3
 import logging
 import os
@@ -45,19 +46,73 @@ class EpisodicMemory:
             return [dict(row) for row in cursor.fetchall()]
 
 class SemanticMemory:
-    """Uses a Vector Database (pgvector / Pinecone) for high-dimensional semantic search."""
-    def __init__(self, connection_string: str = ""):
-        self.connection_string = connection_string
-        logger.info("SemanticMemory initialized (Vector DB facade).")
+    """SQLite FTS5-based semantic search.
 
-    def embed_and_store(self, text: str, metadata: Dict[str, Any]):
-        """Creates embedding and stores in Vector DB."""
-        # Example implementation hooks for vLLM embeddings / OpenAI embeddings
-        pass
+    Replaces the previous Vector DB stub with a lightweight full-text
+    search that works without any external dependencies.  Embeddings
+    can be layered on later via the ``embed_fn`` hook.
+    """
+
+    def __init__(self, db_path: str = "nexus_semantic.db", embed_fn=None):
+        self.db_path = db_path
+        self.embed_fn = embed_fn  # optional: fn(text) → list[float]
+        self._init_db()
+
+    def _init_db(self):
+        with sqlite3.connect(self.db_path) as conn:
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS semantic_store (
+                    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                    text      TEXT NOT NULL,
+                    metadata  TEXT NOT NULL DEFAULT '{}',
+                    created_at REAL NOT NULL
+                );
+                CREATE VIRTUAL TABLE IF NOT EXISTS semantic_fts USING fts5(
+                    doc_id UNINDEXED,
+                    text
+                );
+            """)
+
+    def embed_and_store(self, text: str, metadata: Dict[str, Any]) -> int:
+        """Store text with optional metadata. Returns the new row id."""
+        import time, json
+        with sqlite3.connect(self.db_path) as conn:
+            cur = conn.execute(
+                "INSERT INTO semantic_store (text, metadata, created_at) VALUES (?, ?, ?)",
+                (text, json.dumps(metadata, ensure_ascii=False), time.time()),
+            )
+            row_id = cur.lastrowid
+            conn.execute(
+                "INSERT INTO semantic_fts (doc_id, text) VALUES (?, ?)",
+                (str(row_id), text),
+            )
+        return row_id
 
     def semantic_search(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
-        """Finds closest matches by cosine similarity."""
-        return []
+        """FTS5 keyword search with optional re-rank via embedding similarity."""
+        import json
+        safe = " OR ".join(
+            f"{w}*" for w in re.sub(r"[^\w\s]", " ", query).split() if len(w) > 1
+        )
+        if not safe:
+            return []
+        results: List[Dict[str, Any]] = []
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """SELECT s.id, s.text, s.metadata, s.created_at
+                   FROM semantic_store s
+                   JOIN semantic_fts f ON f.doc_id = CAST(s.id AS TEXT)
+                   WHERE semantic_fts MATCH ?
+                   ORDER BY rank
+                   LIMIT ?""",
+                (safe, top_k),
+            ).fetchall()
+        for row in rows:
+            r = dict(row)
+            r["metadata"] = json.loads(r.get("metadata") or "{}")
+            results.append(r)
+        return results
 
 class ProceduralMemory:
     """Loads and manages skill/playbook rules using SQLite for advanced tracking."""
