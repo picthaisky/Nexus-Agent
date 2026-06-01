@@ -29,6 +29,7 @@ from slowapi import _rate_limit_exceeded_handler
 from nexus_agent.core.knowledge_graph_engine import KnowledgeGraphEngine, RepoGraph
 from nexus_agent.core.skill_vault import SkillVault
 from nexus_agent.core.dashboard_hub import dashboard_hub
+from nexus_agent.core.task_store import task_store
 from nexus_agent.core.inference import InferenceEngine
 from nexus_agent.core.observability import metrics_registry, HardwareMonitor
 from nexus_agent.core.state import AgentMicroState
@@ -294,6 +295,8 @@ ACTIVE_REPO_INFO = {
     "status": "local"
 }
 
+# Repos are now persisted via task_store.connected_repos (SQLite)
+
 
 def _resolve_repo_root(repo_root: str | None) -> str:
     if repo_root and repo_root.strip():
@@ -359,15 +362,22 @@ async def readiness_check():
             checks["redis"] = "error"
             healthy = False
 
-    # Provider configuration (key presence only — no outbound calls)
-    if settings.openai_api_key:
+    # LLM provider checks — fast key-existence check + optional ping
+    any_llm = False
+    if settings.openai_api_key and settings.openai_api_key not in ("", "sk-your-openai-api-key-here"):
         checks["openai"] = "configured"
+        any_llm = True
     if settings.anthropic_api_key:
         checks["claude"] = "configured"
+        any_llm = True
     if settings.gemini_api_key or os.getenv("GOOGLE_API_KEY"):
         checks["gemini"] = "configured"
+        any_llm = True
     if settings.vllm_enabled:
         checks["vllm_local"] = "configured"
+        any_llm = True
+    if not any_llm:
+        checks["llm_providers"] = "warning: no LLM provider configured — inference will fail"
 
     return JSONResponse(
         status_code=200 if healthy else 503,
@@ -834,9 +844,18 @@ async def connect_repo(request: ConnectRepoRequest):
 
     try:
         if local_path.exists() and (local_path / ".git").exists():
-            # Repo exists: fetch and pull/checkout
+            # Repo exists: fetch then checkout (create tracking branch if not yet local)
             subprocess.run([git_binary, "-C", str(local_path), "fetch", "--all"], check=True, capture_output=True)
-            subprocess.run([git_binary, "-C", str(local_path), "checkout", request.branch], check=True, capture_output=True)
+            checkout_result = subprocess.run(
+                [git_binary, "-C", str(local_path), "checkout", request.branch],
+                capture_output=True,
+            )
+            if checkout_result.returncode != 0:
+                # Branch only exists on remote — create a local tracking branch
+                subprocess.run(
+                    [git_binary, "-C", str(local_path), "checkout", "-b", request.branch, f"origin/{request.branch}"],
+                    check=True, capture_output=True,
+                )
             subprocess.run([git_binary, "-C", str(local_path), "pull", "origin", request.branch], check=True, capture_output=True)
         else:
             # Clone it
@@ -852,6 +871,16 @@ async def connect_repo(request: ConnectRepoRequest):
     ACTIVE_REPO_INFO["branch"] = request.branch
     ACTIVE_REPO_INFO["local_path"] = str(local_path)
     ACTIVE_REPO_INFO["status"] = "connected"
+    ACTIVE_REPO_INFO["repo_id"] = digest
+
+    # Persist into SQLite connected-repos registry
+    task_store.upsert_repo(
+        repo_id=digest,
+        repo_url=url,
+        branch=request.branch,
+        local_path=str(local_path),
+        status="connected",
+    )
 
     # Build the Knowledge Graph on the newly connected repo
     try:
@@ -865,7 +894,8 @@ async def connect_repo(request: ConnectRepoRequest):
         "repo_url": url,
         "branch": request.branch,
         "local_path": str(local_path),
-        "graph_summary": summary
+        "repo_id": digest,
+        "graph_summary": summary,
     }
 
 
@@ -873,6 +903,71 @@ async def connect_repo(request: ConnectRepoRequest):
 async def get_active_repo():
     """Returns details of the currently active repository."""
     return ACTIVE_REPO_INFO
+
+
+@app.get("/repo/list", tags=["repo"])
+async def list_repos():
+    """Returns all repositories that have been connected this session."""
+    active_id = ACTIVE_REPO_INFO.get("repo_id", "")
+    return {
+        "repos": [
+            {**r, "is_active": r["repo_id"] == active_id}
+            for r in task_store.list_repos()
+        ]
+    }
+
+
+@app.post("/repo/activate/{repo_id}", tags=["repo"])
+async def activate_repo(repo_id: str):
+    """Switch the active repo to a previously connected one (no re-clone needed)."""
+    entry = task_store.get_repo(repo_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail=f"No connected repo with id '{repo_id}'")
+
+    ACTIVE_REPO_INFO.update({
+        "repo_id": entry["repo_id"],
+        "repo_url": entry["repo_url"],
+        "branch": entry["branch"],
+        "local_path": entry["local_path"],
+        "status": entry["status"],
+    })
+
+    # Re-point Knowledge Graph cache
+    try:
+        graph = _ensure_graph(repo_root=entry["local_path"], include_tests=True)
+        summary = graph.summary()
+    except Exception as exc:
+        summary = {"error": str(exc)}
+
+    return {"status": "activated", **entry, "graph_summary": summary}
+
+
+@app.delete("/repo/{repo_id}", tags=["repo"])
+async def remove_repo(repo_id: str, delete_local: bool = False):
+    """Remove a repo from the connected-repos list (optionally delete local clone)."""
+    import shutil as _shutil
+    entry = task_store.get_repo(repo_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail=f"No connected repo with id '{repo_id}'")
+
+    task_store.delete_repo(repo_id)
+
+    if delete_local:
+        local = Path(entry["local_path"])
+        if local.exists():
+            _shutil.rmtree(local, ignore_errors=True)
+
+    # If this was the active repo, reset to local mode
+    if ACTIVE_REPO_INFO.get("repo_id") == repo_id:
+        ACTIVE_REPO_INFO.update({
+            "repo_id": "",
+            "repo_url": "",
+            "branch": "main",
+            "local_path": DEFAULT_REPO_ROOT,
+            "status": "local",
+        })
+
+    return {"status": "removed", "repo_id": repo_id, "deleted_local": delete_local}
 
 
 @app.get("/skills", tags=["skills"])
@@ -1050,20 +1145,83 @@ async def delete_archived_doc(filename: str):
 
 # -- Orchestrator API --------------------------------------------------------
 
-def _run_orchestrator(goal: str):
-    """Synchronous background runner for the LangGraph Orchestrator."""
-    from nexus_agent.core.orchestrator import Orchestrator
+import uuid as _uuid
+from datetime import datetime as _dt, timezone as _tz
+
+
+def _run_orchestrator(goal: str, task_id: str) -> None:
+    """Synchronous background runner for the LangGraph Orchestrator.
+
+    Emits log immediately so the dashboard always gets feedback, even if the
+    orchestrator import or initialisation fails.
+    """
+    import traceback
+    from nexus_agent.core.state import AgentMicroState as _AMS
+    from nexus_agent.core.models import AgentRole as _AR
+
     logger_ = logging.getLogger("nexus.orchestrator.runner")
-    dashboard_hub.emit_log_threadsafe(f"Task initiated: {goal}", agent_id="system")
+
+    # Agent IDs in the default roster (must stay in sync with DashboardHub.DEFAULT_ROSTER)
+    _ROSTER_AGENTS = [
+        ("planner",   _AR.PLANNER,             _AMS.PLANNING),
+        ("architect",  _AR.TECHNICAL_ARCHITECT, _AMS.DESIGNING),
+        ("developer",  _AR.DEVELOPER,           _AMS.CODING),
+        ("ui_weaver",  _AR.UI_WEAVER,           _AMS.DESIGNING),
+        ("validator",  _AR.VALIDATOR,           _AMS.TESTING),
+        ("optimizer",  _AR.AUTONOMOUS_OPTIMIZER,_AMS.OPTIMIZING),
+    ]
+
+    def _emit_all_agents(micro_state: _AMS, message: str) -> None:
+        for aid, role, _ in _ROSTER_AGENTS:
+            dashboard_hub.emit_state_threadsafe(
+                agent_id=aid, role=role,
+                micro_state=micro_state,
+                status_message=message,
+            )
+
+    # Update registry: running
+    task_store.update_task(task_id, status="running", started_at=_dt.now(_tz.utc).isoformat())
+
+    # Broadcast immediately — before any imports that might fail
+    dashboard_hub.emit_log_threadsafe(
+        f"[TASK:{task_id[:8]}] เริ่มต้นงาน: {goal[:80]}{'...' if len(goal) > 80 else ''}",
+        agent_id="system",
+    )
+    # Signal all agents: task started
+    _emit_all_agents(_AMS.THINKING, f"Task: {goal[:60]}")
+
     try:
+        from nexus_agent.core.orchestrator import Orchestrator  # lazy to catch ImportError
         orch = Orchestrator()
-        logger_.info(f"Starting background orchestrator for goal: {goal}")
+        logger_.info("Orchestrator initialised for task %s", task_id)
+        dashboard_hub.emit_log_threadsafe(
+            f"[TASK:{task_id[:8]}] Orchestrator พร้อมทำงาน — กำลังวิเคราะห์...",
+            agent_id="system",
+        )
         orch.run_task(goal)
-        logger_.info("Orchestrator finished task successfully.")
-        dashboard_hub.emit_log_threadsafe("Task completed successfully.", agent_id="system")
+        logger_.info("Orchestrator finished task %s", task_id)
+        dashboard_hub.emit_log_threadsafe(
+            f"[TASK:{task_id[:8]}] ✅ Task สำเร็จ!", agent_id="system"
+        )
+        task_store.update_task(task_id, status="completed", finished_at=_dt.now(_tz.utc).isoformat())
+        # Reset all agents to IDLE
+        _emit_all_agents(_AMS.COMPLETED, "Task completed ✅")
     except Exception as exc:
-        logger_.error(f"Orchestrator failed: {exc}", exc_info=True)
-        dashboard_hub.emit_log_threadsafe(f"Task failed: {exc}", agent_id="system")
+        tb = traceback.format_exc()
+        logger_.error("Orchestrator failed task %s: %s\n%s", task_id, exc, tb)
+        short_err = str(exc)[:200]
+        dashboard_hub.emit_log_threadsafe(
+            f"[TASK:{task_id[:8]}] ❌ ล้มเหลว: {short_err}", agent_id="system"
+        )
+        task_store.update_task(
+            task_id,
+            status="failed",
+            error=str(exc),
+            traceback=tb[:1000],
+            finished_at=_dt.now(_tz.utc).isoformat(),
+        )
+        # Reset all agents to ERROR then IDLE
+        _emit_all_agents(_AMS.ERROR, f"Task failed: {short_err[:60]}")
 
 
 @app.post("/tasks/run", tags=["orchestrator"])
@@ -1073,5 +1231,48 @@ async def run_task(
     _: Principal = Depends(require_api_key),
 ):
     """Submits a task to the Orchestrator for background execution."""
-    background_tasks.add_task(_run_orchestrator, request.goal)
-    return {"status": "accepted", "goal": request.goal}
+    task_id = str(_uuid.uuid4())
+    task_store.create_task(task_id=task_id, goal=request.goal)
+    background_tasks.add_task(_run_orchestrator, request.goal, task_id)
+    return {"status": "accepted", "goal": request.goal, "task_id": task_id}
+
+
+@app.get("/tasks", tags=["orchestrator"])
+async def list_tasks(_: Principal = Depends(require_api_key)):
+    """Returns all tasks (newest first, persisted across restarts)."""
+    return {"tasks": task_store.list_tasks()}
+
+
+@app.get("/tasks/{task_id}", tags=["orchestrator"])
+async def get_task(task_id: str, _: Principal = Depends(require_api_key)):
+    """Returns status and details for a specific task."""
+    task = task_store.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found")
+    return task
+
+
+@app.post("/tasks/{task_id}/cancel", tags=["orchestrator"])
+async def cancel_task(task_id: str, _: Principal = Depends(require_api_key)):
+    """Mark a queued/running task as cancelled.
+
+    Note: background threads cannot be force-killed in Python — this marks the
+    task as cancelled in the registry so the UI can reflect the state. The
+    background worker will still run to completion unless it checks the status.
+    """
+    task = task_store.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found")
+    if task["status"] in ("completed", "failed", "cancelled"):
+        raise HTTPException(status_code=409, detail=f"Task already in terminal state: {task['status']}")
+
+    task_store.update_task(
+        task_id,
+        status="cancelled",
+        finished_at=_dt.now(_tz.utc).isoformat(),
+        error="Cancelled by user",
+    )
+    dashboard_hub.emit_log_threadsafe(
+        f"[TASK:{task_id[:8]}] 🚫 Task ถูกยกเลิกโดยผู้ใช้", agent_id="system"
+    )
+    return {"status": "cancelled", "task_id": task_id}

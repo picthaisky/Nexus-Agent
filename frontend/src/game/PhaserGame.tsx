@@ -13,7 +13,7 @@ export const PhaserGame = forwardRef<IRefPhaserGame, any>(function PhaserGame (p
     useLayoutEffect(() => {
         if (game.current === null) {
             game.current = StartGame("game-container");
-            
+
             if (typeof ref === 'function') {
                 ref({ game: game.current, scene: null });
             } else if (ref) {
@@ -21,12 +21,23 @@ export const PhaserGame = forwardRef<IRefPhaserGame, any>(function PhaserGame (p
             }
         }
 
+        // Force Phaser Scale Manager to re-measure when container resizes
+        const container = document.getElementById('game-container');
+        let observer: ResizeObserver | null = null;
+        if (container && typeof ResizeObserver !== 'undefined') {
+            observer = new ResizeObserver(() => {
+                game.current?.scale?.refresh();
+            });
+            observer.observe(container);
+        }
+
         return () => {
+            observer?.disconnect();
             if (game.current) {
                 game.current.destroy(true);
                 game.current = null;
             }
-        }
+        };
     }, [ref]);
 
     useEffect(() => {

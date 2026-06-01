@@ -5,13 +5,13 @@ import { OfficeScene } from './scenes/OfficeScene';
 //  https://newdocs.phaser.io/docs/3.70.0/Phaser.Types.Core.GameConfig
 const config: Phaser.Types.Core.GameConfig = {
     type: AUTO,
-    width: 1200,
-    height: 700,
     parent: 'game-container',
     backgroundColor: '#070b14',
     scale: {
         mode: Scale.RESIZE,
-        autoCenter: Scale.CENTER_BOTH
+        autoCenter: Scale.CENTER_BOTH,
+        width: '100%',
+        height: '100%',
     },
     scene: [
         OfficeScene

@@ -1,11 +1,15 @@
 from typing import Any
 import json
 import uuid
-from langchain_core.prompts import ChatPromptTemplate
+
 from nexus_agent.core.state import AgentState
 from nexus_agent.core.memory import ProceduralMemory
 
-from nexus_agent.core.inference import InferenceEngine, InferenceConfig
+try:
+    from nexus_agent.core.inference import InferenceEngine, InferenceConfig
+except Exception:
+    InferenceEngine = None  # type: ignore
+    InferenceConfig = None  # type: ignore
 
 class LearnerAgent:
     """
@@ -15,7 +19,7 @@ class LearnerAgent:
     def __init__(self, procedural_memory: ProceduralMemory):
         self.memory = procedural_memory
         try:
-            self.engine = InferenceEngine(InferenceConfig())
+            self.engine = InferenceEngine(InferenceConfig()) if InferenceEngine else None
         except Exception:
             self.engine = None
         

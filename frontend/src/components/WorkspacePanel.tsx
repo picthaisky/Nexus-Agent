@@ -1,5 +1,27 @@
 import { useState, useEffect } from "react";
-import { GitBranch, BookOpen, UserPlus, FileText, Trash2, Edit2, Plus, ArrowRight, CheckCircle, AlertCircle, RefreshCw } from "lucide-react";
+import { GitBranch, BookOpen, UserPlus, FileText, Trash2, Edit2, Plus, ArrowRight, CheckCircle, AlertCircle, RefreshCw, Zap, GitFork, History, ChevronDown, ChevronRight } from "lucide-react";
+
+interface TaskRun {
+  task_id: string;
+  goal: string;
+  status: "queued" | "running" | "completed" | "failed";
+  started_at: string | null;
+  finished_at: string | null;
+  error: string | null;
+  traceback: string | null;
+  created_at: string;
+}
+
+interface ConnectedRepo {
+  repo_id: string;
+  repo_url: string;
+  branch: string;
+  local_path: string;
+  status: string;
+  connected_at: string;
+  last_synced: string;
+  is_active: boolean;
+}
 
 interface Skill {
   skill_id: string;
@@ -29,7 +51,7 @@ interface ArchivedDoc {
 }
 
 export function WorkspacePanel() {
-  const [activeTab, setActiveTab] = useState<"git" | "skills" | "roster" | "docs">("git");
+  const [activeTab, setActiveTab] = useState<"git" | "skills" | "roster" | "docs" | "tasks">("git");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ text: string; type: "success" | "error" } | null>(null);
 
@@ -49,6 +71,9 @@ export function WorkspacePanel() {
 
   // State storage
   const [repoInfo, setRepoInfo] = useState({ repo_url: "", branch: "main", local_path: "", status: "unknown" });
+  const [connectedRepos, setConnectedRepos] = useState<ConnectedRepo[]>([]);
+  const [taskRuns, setTaskRuns] = useState<TaskRun[]>([]);
+  const [expandedTask, setExpandedTask] = useState<string | null>(null);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [roster, setRoster] = useState<Agent[]>([]);
   const [archivedDocs, setArchivedDocs] = useState<ArchivedDoc[]>([]);
@@ -66,49 +91,115 @@ export function WorkspacePanel() {
   const [isEditingDoc, setIsEditingDoc] = useState(false);
   const [isAddingAgent, setIsAddingAgent] = useState(false);
 
-  // Fetch functions
-  const fetchRepoInfo = async () => {
+  // Fetch functions — accept AbortSignal so useEffect can cancel on unmount / tab change
+  const fetchRepoInfo = async (signal?: AbortSignal) => {
     try {
-      const res = await fetch(getApiUrl("/repo/active"), { headers: getHeaders() });
+      const res = await fetch(getApiUrl("/repo/active"), { headers: getHeaders(), signal });
       if (res.ok) setRepoInfo(await res.json());
-    } catch (e) { console.error(e); }
+    } catch (e: any) { if (e?.name !== "AbortError") console.error(e); }
   };
 
-  const fetchSkills = async () => {
+  const fetchConnectedRepos = async (signal?: AbortSignal) => {
     try {
-      const res = await fetch(getApiUrl("/skills"), { headers: getHeaders() });
+      const res = await fetch(getApiUrl("/repo/list"), { headers: getHeaders(), signal });
+      if (res.ok) {
+        const data = await res.json();
+        setConnectedRepos(data.repos || []);
+      }
+    } catch (e: any) { if (e?.name !== "AbortError") console.error(e); }
+  };
+
+  const fetchTasks = async (signal?: AbortSignal) => {
+    try {
+      const res = await fetch(getApiUrl("/tasks"), { headers: getHeaders(), signal });
+      if (res.ok) {
+        const data = await res.json();
+        setTaskRuns(data.tasks || []);
+      }
+    } catch (e: any) { if (e?.name !== "AbortError") console.error(e); }
+  };
+
+  const handleActivateRepo = async (repoId: string) => {
+    setLoading(true);
+    try {
+      const res = await fetch(getApiUrl(`/repo/activate/${repoId}`), {
+        method: "POST",
+        headers: getHeaders(),
+      });
+      if (res.ok) {
+        await fetchRepoInfo();
+        await fetchConnectedRepos();
+        showMsg("Repository switched and Knowledge Graph reloaded!", "success");
+      } else {
+        const err = await res.json();
+        showMsg(err.detail || "Failed to activate repository", "error");
+      }
+    } catch (e: any) {
+      showMsg(e.message, "error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRemoveRepo = async (repoId: string) => {
+    if (!confirm("Remove this repository from the list? (Local clone will be kept)")) return;
+    try {
+      const res = await fetch(getApiUrl(`/repo/${repoId}`), {
+        method: "DELETE",
+        headers: getHeaders(),
+      });
+      if (res.ok) {
+        await fetchRepoInfo();
+        await fetchConnectedRepos();
+        showMsg("Repository removed.", "success");
+      } else {
+        showMsg("Failed to remove repository", "error");
+      }
+    } catch (e: any) {
+      showMsg(e.message, "error");
+    }
+  };
+
+  const fetchSkills = async (signal?: AbortSignal) => {
+    try {
+      const res = await fetch(getApiUrl("/skills"), { headers: getHeaders(), signal });
       if (res.ok) {
         const data = await res.json();
         setSkills(data.skills || []);
       }
-    } catch (e) { console.error(e); }
+    } catch (e: any) { if (e?.name !== "AbortError") console.error(e); }
   };
 
-  const fetchRoster = async () => {
+  const fetchRoster = async (signal?: AbortSignal) => {
     try {
-      const res = await fetch(getApiUrl("/dashboard/roster"), { headers: getHeaders() });
+      const res = await fetch(getApiUrl("/dashboard/roster"), { headers: getHeaders(), signal });
       if (res.ok) {
         const data = await res.json();
         setRoster(data.agents || []);
       }
-    } catch (e) { console.error(e); }
+    } catch (e: any) { if (e?.name !== "AbortError") console.error(e); }
   };
 
-  const fetchDocs = async () => {
+  const fetchDocs = async (signal?: AbortSignal) => {
     try {
-      const res = await fetch(getApiUrl("/docs/archive"), { headers: getHeaders() });
+      const res = await fetch(getApiUrl("/docs/archive"), { headers: getHeaders(), signal });
       if (res.ok) {
         const data = await res.json();
         setArchivedDocs(data.documents || []);
       }
-    } catch (e) { console.error(e); }
+    } catch (e: any) { if (e?.name !== "AbortError") console.error(e); }
   };
 
   useEffect(() => {
-    fetchRepoInfo();
-    fetchSkills();
-    fetchRoster();
-    fetchDocs();
+    const controller = new AbortController();
+    const { signal } = controller;
+    fetchRepoInfo(signal);
+    fetchConnectedRepos(signal);
+    fetchSkills(signal);
+    fetchRoster(signal);
+    fetchDocs(signal);
+    fetchTasks(signal);
+    return () => controller.abort();
   }, [activeTab]);
 
   const showMsg = (text: string, type: "success" | "error") => {
@@ -129,6 +220,7 @@ export function WorkspacePanel() {
       if (res.ok) {
         const data = await res.json();
         setRepoInfo(data);
+        fetchConnectedRepos();
         showMsg("Connected repository and compiled Knowledge Graph successfully!", "success");
       } else {
         const err = await res.json();
@@ -336,6 +428,18 @@ export function WorkspacePanel() {
             <FileText className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Archived Docs (.md)</span>
           </button>
+          <button
+            onClick={() => { setActiveTab("tasks"); fetchTasks(); }}
+            className={`flex items-center gap-1 px-2.5 py-1.5 text-xs font-mono tracking-wide transition-all ${
+              activeTab === "tasks" ? "text-cyber-neon border-b border-cyber-neon font-bold" : "text-slate-400 hover:text-slate-200"
+            }`}
+          >
+            <History className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Task History</span>
+            {taskRuns.some(t => t.status === "running") && (
+              <span className="w-1.5 h-1.5 bg-status-success rounded-full animate-pulse" />
+            )}
+          </button>
         </div>
 
         {/* Global Action indicator / loading */}
@@ -357,8 +461,10 @@ export function WorkspacePanel() {
         
         {/* 1. GIT REPOSITORY PANEL */}
         {activeTab === "git" && (
-          <div className="h-full flex flex-col md:flex-row gap-6 overflow-y-auto pr-2">
-            <div className="flex-1 space-y-4">
+          <div className="h-full flex flex-col md:flex-row gap-5 overflow-y-auto pr-2">
+
+            {/* Left: Connect form */}
+            <div className="flex-1 space-y-4 min-w-0">
               <h3 className="text-sm font-bold uppercase tracking-wider text-cyber-neon/80 font-mono">Connect Workspace Repository</h3>
               <form onSubmit={handleConnectRepo} className="space-y-3">
                 <div>
@@ -392,10 +498,99 @@ export function WorkspacePanel() {
                   <ArrowRight className="w-3 h-3" />
                 </button>
               </form>
+
+              {/* Connected Repositories List */}
+              <div className="pt-3 border-t border-cyber-neon/10">
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="text-[10px] uppercase font-mono text-slate-400 tracking-widest flex items-center gap-1.5">
+                    <GitFork className="w-3 h-3" />
+                    Connected Repositories ({connectedRepos.length})
+                  </h4>
+                  <button
+                    type="button"
+                    aria-label="Refresh list"
+                    title="Refresh list"
+                    onClick={() => fetchConnectedRepos()}
+                    className="p-1 text-slate-500 hover:text-cyber-neon transition-colors"
+                  >
+                    <RefreshCw aria-hidden="true" className="w-3 h-3" />
+                  </button>
+                </div>
+
+                {connectedRepos.length === 0 ? (
+                  <div className="text-[10px] text-slate-600 font-mono italic">
+                    No repositories connected yet.
+                  </div>
+                ) : (
+                  <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                    {connectedRepos.map((repo) => {
+                      const repoName = repo.repo_url.split("/").pop()?.replace(".git", "") ?? repo.repo_url;
+                      const owner = repo.repo_url.split("/").slice(-2, -1)[0] ?? "";
+                      return (
+                        <div
+                          key={repo.repo_id}
+                          className={`flex items-start gap-3 p-2.5 rounded-lg border transition-all ${
+                            repo.is_active
+                              ? "bg-cyber-neon/8 border-cyber-neon/30"
+                              : "bg-black/20 border-cyber-neon/10 hover:border-cyber-neon/20"
+                          }`}
+                        >
+                          {/* Icon + name */}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5 mb-0.5">
+                              {repo.is_active && (
+                                <span className="w-1.5 h-1.5 rounded-full bg-status-success flex-none animate-pulse" />
+                              )}
+                              <span className="text-xs font-bold font-mono text-white truncate">
+                                {owner}/{repoName}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2 text-[9px] font-mono text-slate-400">
+                              <GitBranch className="w-2.5 h-2.5 flex-none" />
+                              <span className="truncate">{repo.branch}</span>
+                              {repo.is_active && (
+                                <span className="text-status-success font-bold uppercase">active</span>
+                              )}
+                            </div>
+                            <div className="text-[8px] text-slate-600 font-mono mt-0.5">
+                              Synced {new Date(repo.last_synced).toLocaleString()}
+                            </div>
+                          </div>
+
+                          {/* Actions */}
+                          <div className="flex gap-1 flex-none">
+                            {!repo.is_active && (
+                              <button
+                                type="button"
+                                onClick={() => handleActivateRepo(repo.repo_id)}
+                                disabled={loading}
+                                aria-label="Switch to this repository"
+                                title="Switch to this repository"
+                                className="p-1 border border-cyber-neon/30 bg-cyber-neon/5 text-cyber-neon hover:bg-cyber-neon/15 rounded disabled:opacity-40 transition-all"
+                              >
+                                <Zap aria-hidden="true" className="w-3 h-3" />
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              aria-label="Remove from list"
+                              title="Remove from list"
+                              onClick={() => handleRemoveRepo(repo.repo_id)}
+                              className="p-1 border border-status-error/30 bg-status-error/5 text-status-error hover:bg-status-error/15 rounded transition-all"
+                            >
+                              <Trash2 aria-hidden="true" className="w-3 h-3" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             </div>
 
-            {/* Current Active Repo Card */}
-            <div className="w-full md:w-80 bg-black/20 border border-cyber-neon/10 rounded-xl p-4 flex flex-col justify-between">
+            {/* Right: Active Repo Card */}
+            <div className="w-full md:w-72 flex-none bg-black/20 border border-cyber-neon/10 rounded-xl p-4 flex flex-col justify-between">
               <div>
                 <h4 className="text-xs font-bold uppercase tracking-wider text-cyber-gold font-mono mb-3">Active Workspace Details</h4>
                 <div className="space-y-2 text-xs font-mono">
@@ -436,6 +631,9 @@ export function WorkspacePanel() {
               <div className="flex items-center justify-between mb-2">
                 <span className="text-[10px] uppercase font-mono text-slate-400">{skills.length} Skills</span>
                 <button
+                  type="button"
+                  aria-label="เพิ่ม Skill ใหม่"
+                  title="เพิ่ม Skill ใหม่"
                   onClick={() => {
                     setIsEditingSkill(true);
                     setSelectedSkill(null);
@@ -443,7 +641,7 @@ export function WorkspacePanel() {
                   }}
                   className="p-1 bg-cyber-neon/10 hover:bg-cyber-neon/20 border border-cyber-neon/30 rounded text-cyber-neon"
                 >
-                  <Plus className="w-3 h-3" />
+                  <Plus aria-hidden="true" className="w-3 h-3" />
                 </button>
               </div>
               <div className="flex-1 overflow-y-auto space-y-1.5 pr-1">
@@ -566,15 +764,20 @@ export function WorkspacePanel() {
                             tags: selectedSkill.tags.join(", ")
                           });
                         }}
+                        aria-label="Edit skill"
+                        title="Edit skill"
                         className="p-1 border border-cyber-neon/25 bg-cyber-neon/5 text-cyber-neon hover:bg-cyber-neon/15 rounded"
                       >
-                        <Edit2 className="w-3.5 h-3.5" />
+                        <Edit2 aria-hidden="true" className="w-3.5 h-3.5" />
                       </button>
                       <button
+                        type="button"
+                        aria-label="Delete skill"
+                        title="Delete skill"
                         onClick={() => handleDeleteSkill(selectedSkill.skill_id)}
                         className="p-1 border border-status-error/35 bg-status-error/5 text-status-error hover:bg-status-error/15 rounded"
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
+                        <Trash2 aria-hidden="true" className="w-3.5 h-3.5" />
                       </button>
                     </div>
                   </div>
@@ -623,10 +826,13 @@ export function WorkspacePanel() {
               <div className="flex items-center justify-between mb-2">
                 <span className="text-[10px] uppercase font-mono text-slate-400">{roster.length} Active Positions</span>
                 <button
+                  type="button"
+                  aria-label="Add agent"
+                  title="Add agent"
                   onClick={() => setIsAddingAgent(!isAddingAgent)}
                   className="p-1 bg-cyber-neon/10 hover:bg-cyber-neon/20 border border-cyber-neon/30 rounded text-cyber-neon"
                 >
-                  <Plus className="w-3 h-3" />
+                  <Plus aria-hidden="true" className="w-3 h-3" />
                 </button>
               </div>
               <div className="flex-1 overflow-y-auto space-y-1.5 pr-1">
@@ -642,10 +848,13 @@ export function WorkspacePanel() {
                     <div className="flex items-center gap-1.5">
                       <span className="text-[8px] font-mono bg-status-success/20 text-status-success px-1 py-0.2 rounded">EXP {a.exp_points}</span>
                       <button
+                        type="button"
+                        aria-label={`Remove agent ${a.display_name}`}
+                        title="Remove agent"
                         onClick={() => handleDeleteAgent(a.agent_id)}
                         className="p-0.5 border border-status-error/30 text-status-error hover:bg-status-error/15 rounded"
                       >
-                        <Trash2 className="w-3 h-3" />
+                        <Trash2 aria-hidden="true" className="w-3 h-3" />
                       </button>
                     </div>
                   </div>
@@ -681,8 +890,16 @@ export function WorkspacePanel() {
                     />
                   </div>
                   <div>
-                    <label className="block text-[9px] uppercase text-slate-400 font-mono mb-1">Job Role / Specification</label>
+                    <label
+                      htmlFor="agent-role-select"
+                      className="block text-[9px] uppercase text-slate-400 font-mono mb-1"
+                    >
+                      Job Role / Specification
+                    </label>
                     <select
+                      id="agent-role-select"
+                      aria-label="Job Role / Specification"
+                      title="Job Role / Specification"
                       value={agentForm.role}
                       onChange={(e) => setAgentForm({ ...agentForm, role: e.target.value })}
                       className="w-full bg-[#070b14] border border-cyber-neon/20 rounded px-2 py-1 text-xs text-slate-100 focus:outline-none focus:border-cyber-neon"
@@ -734,6 +951,9 @@ export function WorkspacePanel() {
               <div className="flex items-center justify-between mb-2">
                 <span className="text-[10px] uppercase font-mono text-slate-400">{archivedDocs.length} Documents</span>
                 <button
+                  type="button"
+                  aria-label="Add document"
+                  title="Add document"
                   onClick={() => {
                     setIsEditingDoc(true);
                     setSelectedDoc(null);
@@ -741,7 +961,7 @@ export function WorkspacePanel() {
                   }}
                   className="p-1 bg-cyber-neon/10 hover:bg-cyber-neon/20 border border-cyber-neon/30 rounded text-cyber-neon"
                 >
-                  <Plus className="w-3 h-3" />
+                  <Plus aria-hidden="true" className="w-3 h-3" />
                 </button>
               </div>
               <div className="flex-1 overflow-y-auto space-y-1.5 pr-1">
@@ -829,6 +1049,9 @@ export function WorkspacePanel() {
                     </div>
                     <div className="flex gap-1.5">
                       <button
+                        type="button"
+                        aria-label="Edit document"
+                        title="Edit document"
                         onClick={() => {
                           setIsEditingDoc(true);
                           setDocForm({
@@ -839,13 +1062,16 @@ export function WorkspacePanel() {
                         }}
                         className="p-1 border border-cyber-neon/25 bg-cyber-neon/5 text-cyber-neon hover:bg-cyber-neon/15 rounded"
                       >
-                        <Edit2 className="w-3.5 h-3.5" />
+                        <Edit2 aria-hidden="true" className="w-3.5 h-3.5" />
                       </button>
                       <button
+                        type="button"
+                        aria-label="Delete document"
+                        title="Delete document"
                         onClick={() => handleDeleteDoc(selectedDoc.filename)}
                         className="p-1 border border-status-error/35 bg-status-error/5 text-status-error hover:bg-status-error/15 rounded"
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
+                        <Trash2 aria-hidden="true" className="w-3.5 h-3.5" />
                       </button>
                     </div>
                   </div>
@@ -861,6 +1087,115 @@ export function WorkspacePanel() {
                 </div>
               )}
             </div>
+          </div>
+        )}
+
+        {/* 5. TASK HISTORY PANEL */}
+        {activeTab === "tasks" && (
+          <div className="h-full flex flex-col gap-3 overflow-hidden">
+            <div className="flex items-center justify-between flex-none">
+              <h3 className="text-sm font-bold uppercase tracking-wider text-cyber-neon/80 font-mono">
+                Task History ({taskRuns.length})
+              </h3>
+              <button
+                type="button"
+                aria-label="Refresh task list"
+                title="Refresh task list"
+                onClick={() => fetchTasks()}
+                className="p-1 text-slate-500 hover:text-cyber-neon transition-colors"
+              >
+                <RefreshCw aria-hidden="true" className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {taskRuns.length === 0 ? (
+              <div className="flex-1 flex items-center justify-center text-slate-600 font-mono text-xs italic">
+                ยังไม่มี task — ลองพิมพ์คำสั่งใน command input ด้านล่าง
+              </div>
+            ) : (
+              <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+                {taskRuns.map((task) => {
+                  const isExpanded = expandedTask === task.task_id;
+                  const statusColor =
+                    task.status === "completed" ? "text-status-success border-status-success/30 bg-status-success/5"
+                    : task.status === "failed"  ? "text-status-error border-status-error/30 bg-status-error/5"
+                    : task.status === "running" ? "text-cyber-neon border-cyber-neon/30 bg-cyber-neon/5 animate-pulse"
+                    : "text-slate-400 border-slate-700 bg-black/20";
+                  const statusIcon =
+                    task.status === "completed" ? "✅"
+                    : task.status === "failed"  ? "❌"
+                    : task.status === "running" ? "⚡"
+                    : "⏳";
+                  return (
+                    <div
+                      key={task.task_id}
+                      className={`rounded-lg border font-mono text-[10px] ${statusColor} overflow-hidden`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setExpandedTask(isExpanded ? null : task.task_id)}
+                        className="w-full flex items-start gap-2 px-3 py-2 text-left hover:bg-white/5 transition-colors"
+                      >
+                        <span className="flex-none mt-0.5">{statusIcon}</span>
+                        <span className="flex-1 min-w-0 truncate">{task.goal}</span>
+                        <span className="flex-none opacity-50 text-[9px]">
+                          {task.task_id.slice(0, 8)}
+                        </span>
+                        {isExpanded
+                          ? <ChevronDown className="w-3 h-3 flex-none opacity-60" />
+                          : <ChevronRight className="w-3 h-3 flex-none opacity-60" />
+                        }
+                      </button>
+
+                      {isExpanded && (
+                        <div className="px-3 pb-3 space-y-1.5 border-t border-current/10">
+                          <div className="grid grid-cols-2 gap-2 mt-2 text-[9px]">
+                            <div>
+                              <span className="opacity-50 uppercase">Status</span>
+                              <div className="font-bold uppercase">{task.status}</div>
+                            </div>
+                            <div>
+                              <span className="opacity-50 uppercase">Started</span>
+                              <div>{task.started_at
+                                ? new Date(task.started_at).toLocaleString("th-TH")
+                                : "—"}
+                              </div>
+                            </div>
+                            <div>
+                              <span className="opacity-50 uppercase">Finished</span>
+                              <div>{task.finished_at
+                                ? new Date(task.finished_at).toLocaleString("th-TH")
+                                : "—"}
+                              </div>
+                            </div>
+                            <div>
+                              <span className="opacity-50 uppercase">Task ID</span>
+                              <div className="truncate">{task.task_id}</div>
+                            </div>
+                          </div>
+                          {task.error && (
+                            <div className="mt-2">
+                              <div className="opacity-50 uppercase text-[9px] mb-0.5">Error</div>
+                              <pre className="bg-black/40 rounded p-2 text-status-error text-[9px] whitespace-pre-wrap break-words max-h-24 overflow-y-auto">
+                                {task.error}
+                              </pre>
+                            </div>
+                          )}
+                          {task.traceback && (
+                            <details className="mt-1">
+                              <summary className="opacity-50 text-[9px] cursor-pointer hover:opacity-80">Traceback</summary>
+                              <pre className="bg-black/40 rounded p-2 text-slate-400 text-[8px] whitespace-pre-wrap break-words max-h-32 overflow-y-auto mt-1">
+                                {task.traceback}
+                              </pre>
+                            </details>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
 

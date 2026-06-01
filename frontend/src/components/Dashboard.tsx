@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
-import { Activity, Cpu, Wifi, WifiOff, LayoutGrid, Box, Sliders, Search, Briefcase } from "lucide-react";
+import { Activity, Cpu, Wifi, WifiOff, LayoutGrid, Box, Sliders, Search, Briefcase, LogOut } from "lucide-react";
 import { useAgentSocket } from "../hooks/useAgentSocket";
+import { useAuth } from "../auth";
 import { AgentMonitorCell } from "./AgentMonitorCell";
 import { CommandInput } from "./CommandInput";
 import { SystemHealthPanel } from "./SystemHealthPanel";
@@ -9,10 +10,12 @@ import { IsometricRoom } from "./IsometricRoom";
 import { WorkspacePanel } from "./WorkspacePanel";
 import { AgentspacePanel } from "./AgentspacePanel";
 import { SpecialistOfficePanel } from "./SpecialistOfficePanel";
+import { ErrorBoundary } from "./ErrorBoundary";
 
 const ORDER = ["planner", "architect", "developer", "ui_weaver", "validator", "optimizer"];
 
 export default function Dashboard() {
+  const { setApiKey } = useAuth();
   const { agents, connected, expEffects, logs } = useAgentSocket();
   const [viewMode, setViewMode] = useState<"grid" | "isometric" | "workspace" | "agentspace" | "specialists">("isometric");
 
@@ -32,7 +35,7 @@ export default function Dashboard() {
   );
   const totalExp = Object.values(agents).reduce((acc, a) => acc + (a.exp_points || 0), 0);
 
-  const handleRunTask = async (goal: string) => {
+  const handleRunTask = async (goal: string): Promise<{ task_id?: string }> => {
     const key = (window as unknown as { __NEXUS_API_KEY__?: string | null }).__NEXUS_API_KEY__ || "";
     const targetUrl = import.meta.env?.VITE_NEXUS_API_URL ? `${import.meta.env.VITE_NEXUS_API_URL}/tasks/run` : "/tasks/run";
     const res = await fetch(targetUrl, {
@@ -44,8 +47,10 @@ export default function Dashboard() {
       body: JSON.stringify({ goal })
     });
     if (!res.ok) {
-      throw new Error(`Failed to submit task: ${res.status}`);
+      const err = await res.json().catch(() => ({}));
+      throw new Error((err as { detail?: string }).detail || `Failed to submit task: ${res.status}`);
     }
+    return res.json();
   };
 
   return (
@@ -137,6 +142,16 @@ export default function Dashboard() {
               {connected ? <Wifi className="h-3 w-3 md:h-4 md:w-4 shrink-0" /> : <WifiOff className="h-3 w-3 md:h-4 md:w-4 shrink-0" />}
               <span>{connected ? "LIVE" : "OFFLINE"}</span>
             </div>
+
+            {/* Logout */}
+            <button
+              type="button"
+              onClick={() => { if (confirm("ออกจากระบบ?")) setApiKey(null); }}
+              title="Logout"
+              className="p-1.5 rounded-md border border-slate-700 text-slate-500 hover:text-status-error hover:border-status-error/40 transition-colors"
+            >
+              <LogOut className="h-3.5 w-3.5" />
+            </button>
           </div>
         </div>
       </header>
@@ -155,19 +170,29 @@ export default function Dashboard() {
               Waiting for agent telemetry…
             </div>
           ) : viewMode === "isometric" ? (
-            <IsometricRoom agents={agents} expEffects={expEffects} />
+            <ErrorBoundary>
+              <IsometricRoom agents={agents} expEffects={expEffects} />
+            </ErrorBoundary>
           ) : viewMode === "grid" ? (
-            <div className="grid grid-cols-1 gap-4 md:gap-6 sm:grid-cols-2 xl:grid-cols-3">
-              {cells.map((a) => (
-                <AgentMonitorCell key={a.agent_id} agent={a} expFx={fxByAgent[a.agent_id]} />
-              ))}
-            </div>
+            <ErrorBoundary>
+              <div className="grid grid-cols-1 gap-4 md:gap-6 sm:grid-cols-2 xl:grid-cols-3">
+                {cells.map((a) => (
+                  <AgentMonitorCell key={a.agent_id} agent={a} expFx={fxByAgent[a.agent_id]} />
+                ))}
+              </div>
+            </ErrorBoundary>
           ) : viewMode === "workspace" ? (
-            <WorkspacePanel />
+            <ErrorBoundary>
+              <WorkspacePanel />
+            </ErrorBoundary>
           ) : viewMode === "agentspace" ? (
-            <AgentspacePanel />
+            <ErrorBoundary>
+              <AgentspacePanel />
+            </ErrorBoundary>
           ) : (
-            <SpecialistOfficePanel />
+            <ErrorBoundary>
+              <SpecialistOfficePanel />
+            </ErrorBoundary>
           )}
         </section>
 

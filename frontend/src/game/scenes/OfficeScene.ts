@@ -60,6 +60,7 @@ interface AgentSpriteData {
     targetCart: { x: number; y: number };
     wanderTimer: number;
     currentState: MicroState;
+    lastBubbleMsg: string;  // track last shown message to avoid re-showing same text
 }
 
 // ─── Scene ────────────────────────────────────────────────────────────────────
@@ -923,32 +924,69 @@ export class OfficeScene extends Scene {
                     targetCart: { x: startCart.cartX, y: startCart.cartY },
                     wanderTimer: randBetween(2000, 6000),
                     currentState: agent.current_micro_state,
+                    lastBubbleMsg: '',
                 });
             }
 
             const spriteData = this.agentSprites.get(id)!;
             spriteData.currentState = agent.current_micro_state;
 
-            // Update label
-            spriteData.label.setText(agent.display_name);
+            // Update label — show micro_state badge
+            const stateEmoji: Record<string, string> = {
+                idle: '💤', thinking: '💭', planning: '📋', coding: '💻',
+                executing: '⚡', testing: '🔍', optimizing: '🔧',
+                completed: '✅', error: '❌', waiting_for_human: '⏳',
+                designing: '🎨', walking: '🚶',
+            };
+            const badge = stateEmoji[agent.current_micro_state] ?? '';
+            spriteData.label.setText(`${badge} ${agent.display_name}`);
 
-            // Speech bubble for status messages
-            if (agent.status_message && !spriteData.bubble) {
-                const bubble = this.add.text(0, -108, agent.status_message, {
+            // Speech bubble: show when message changes and is non-empty
+            const msg = agent.status_message?.trim();
+            const shouldShow = msg &&
+                msg !== spriteData.lastBubbleMsg &&
+                !['Task completed', 'Task failed', 'Completed', ''].includes(msg);
+
+            if (shouldShow) {
+                // Destroy existing bubble first
+                if (spriteData.bubble) {
+                    spriteData.bubble.destroy();
+                    spriteData.bubble = undefined;
+                }
+                spriteData.lastBubbleMsg = msg!;
+
+                const truncated = msg!.length > 80 ? msg!.slice(0, 77) + '…' : msg!;
+                const stateColor = this.getMicroStateColor(agent.current_micro_state);
+                const hexColor = '#' + stateColor.toString(16).padStart(6, '0');
+
+                const bubble = this.add.text(0, -112, truncated, {
                     fontFamily: 'sans-serif',
                     fontSize: '9px',
                     color: '#000000',
-                    backgroundColor: '#ffffff',
+                    backgroundColor: hexColor + 'ee',
                     padding: { x: 5, y: 3 },
-                    wordWrap: { width: 90 },
-                }).setOrigin(0.5);
+                    wordWrap: { width: 110 },
+                }).setOrigin(0.5).setAlpha(0);
+
                 spriteData.container.add(bubble);
                 spriteData.bubble = bubble;
 
-                this.time.delayedCall(4000, () => {
-                    if (spriteData.bubble) {
-                        spriteData.bubble.destroy();
-                        spriteData.bubble = undefined;
+                // Fade in
+                this.tweens.add({ targets: bubble, alpha: 1, duration: 300, ease: 'Power2' });
+
+                // Auto-dismiss after 5s with fade out
+                this.time.delayedCall(5000, () => {
+                    if (spriteData.bubble === bubble) {
+                        this.tweens.add({
+                            targets: bubble,
+                            alpha: 0,
+                            y: bubble.y - 8,
+                            duration: 400,
+                            onComplete: () => {
+                                bubble.destroy();
+                                if (spriteData.bubble === bubble) spriteData.bubble = undefined;
+                            },
+                        });
                     }
                 });
             }

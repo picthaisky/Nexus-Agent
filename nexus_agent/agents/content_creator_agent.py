@@ -1,9 +1,4 @@
-"""Content Creator Agent.
-
-Role: Expert Copywriter and Content Strategist.
-Responsibility: Create standard-length articles and social media posts based on topics and keywords.
-"""
-
+"""Content Creator Agent — real LLM-powered content generation."""
 from __future__ import annotations
 
 import logging
@@ -15,37 +10,73 @@ from nexus_agent.core.models import AgentRole, ContentCreationResult
 logger = logging.getLogger(__name__)
 
 CONTENT_CREATOR_SYSTEM_PROMPT = """You are the Content Creator Agent for Nexus-Agent.
-Your role is to act as an expert copywriter, SEO specialist, and social media manager.
-You are given a topic or prompt.
-Your responsibility is to write engaging, well-structured content (such as standard-length articles or social media posts) in Markdown format.
-Ensure the tone matches the requested platform (e.g., professional for articles, catchy for social media).
-"""
+You are an expert copywriter, SEO specialist, and content strategist.
+
+When given a topic or prompt:
+1. Write engaging, well-structured content in Markdown
+2. Adapt tone to the platform (professional for articles, catchy for social media)
+3. Include relevant sections: headline, intro, body, CTA
+4. Provide both a social media version and a long-form article outline
+
+Respond in Markdown format. Use Thai if the request is in Thai."""
+
 
 class ContentCreatorAgent(BaseAgent):
-    """Executes content creation and returns a ContentCreationResult."""
+    """Content creator agent backed by LLM inference."""
 
     role = AgentRole.CONTENT_CREATOR_AGENT
 
     def __init__(self) -> None:
         super().__init__(system_prompt=CONTENT_CREATOR_SYSTEM_PROMPT)
+        try:
+            from nexus_agent.core.inference import InferenceEngine, InferenceConfig
+            self.engine = InferenceEngine(InferenceConfig())
+        except Exception:
+            self.engine = None
 
     def run(self, payload: dict[str, Any]) -> ContentCreationResult:
-        """Execute a content creation task and return the drafted content."""
         topic = payload.get("topic", "")
+        platform = payload.get("platform", "general")
         if not topic:
             raise ValueError("ContentCreatorAgent requires a 'topic' in the payload.")
-            
-        logger.info(f"ContentCreatorAgent drafting content for: {topic[:50]}...")
-        
-        # In a real implementation, this agent would use an InferenceEngine 
-        # (like GPT-4 or Claude) to generate the actual content based on the prompt.
-        # For now, we simulate the output.
-        
-        content_md = f"### Content Draft: {topic}\\n\\n**[Social Media Post]**\\nExciting news about {topic}! 🚀 Check out our latest insights on how this changes everything. #Innovation #Future\\n\\n**[Article Outline]**\\n1. Introduction to {topic}\\n2. Key Benefits\\n3. How to get started\\n4. Conclusion"
-        metadata = {"word_count": len(content_md.split()), "tone": "engaging"}
-            
-        return ContentCreationResult(
-            topic=topic,
-            content_md=content_md,
-            metadata=metadata
+
+        logger.info("ContentCreatorAgent drafting content for: %s", topic[:80])
+
+        content_md, metadata = self._generate(topic, platform)
+        return ContentCreationResult(topic=topic, content_md=content_md, metadata=metadata)
+
+    def _generate(self, topic: str, platform: str) -> tuple[str, dict]:
+        user_msg = f"Platform: {platform}\nTopic: {topic}"
+
+        if self.engine is not None:
+            try:
+                resp = self.engine.generate_detailed(
+                    messages=[
+                        {"role": "system", "content": self.system_prompt},
+                        {"role": "user", "content": user_msg},
+                    ],
+                    temperature=0.7,
+                )
+                word_count = len(resp.content.split())
+                return resp.content, {
+                    "word_count": word_count,
+                    "platform": platform,
+                    "provider": resp.provider,
+                    "tokens_in": resp.tokens_in,
+                    "tokens_out": resp.tokens_out,
+                }
+            except Exception as exc:
+                logger.warning("ContentCreatorAgent LLM call failed: %s", exc)
+
+        # Fallback template
+        content_md = (
+            f"## {topic}\n\n"
+            f"> ⚠️ ระบบยังไม่ได้รับการตั้งค่า LLM Provider\n\n"
+            f"**[Social Media]**\n🚀 {topic} — สิ่งที่คุณต้องรู้! #Innovation\n\n"
+            f"**[Article Outline]**\n"
+            f"1. บทนำ: {topic} คืออะไร?\n"
+            f"2. ประโยชน์หลัก\n"
+            f"3. วิธีเริ่มต้น\n"
+            f"4. สรุปและ Call-to-Action"
         )
+        return content_md, {"word_count": len(content_md.split()), "platform": platform, "status": "fallback"}
