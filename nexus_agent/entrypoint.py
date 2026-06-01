@@ -834,9 +834,18 @@ async def connect_repo(request: ConnectRepoRequest):
 
     try:
         if local_path.exists() and (local_path / ".git").exists():
-            # Repo exists: fetch and pull/checkout
+            # Repo exists: fetch then checkout (create tracking branch if not yet local)
             subprocess.run([git_binary, "-C", str(local_path), "fetch", "--all"], check=True, capture_output=True)
-            subprocess.run([git_binary, "-C", str(local_path), "checkout", request.branch], check=True, capture_output=True)
+            checkout_result = subprocess.run(
+                [git_binary, "-C", str(local_path), "checkout", request.branch],
+                capture_output=True,
+            )
+            if checkout_result.returncode != 0:
+                # Branch only exists on remote — create a local tracking branch
+                subprocess.run(
+                    [git_binary, "-C", str(local_path), "checkout", "-b", request.branch, f"origin/{request.branch}"],
+                    check=True, capture_output=True,
+                )
             subprocess.run([git_binary, "-C", str(local_path), "pull", "origin", request.branch], check=True, capture_output=True)
         else:
             # Clone it
