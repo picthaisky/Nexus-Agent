@@ -157,6 +157,14 @@ export class OfficeScene extends Scene {
     private nearbyId:  string | null = null;
     private lastNearby: string | null = null;
 
+    // ── Drag-to-pan state ─────────────────────────────────────────────────────
+    private isPanning      = false;
+    private panAnchorX     = 0;   // pointer screen-X when drag started
+    private panAnchorY     = 0;   // pointer screen-Y when drag started
+    private panScrollX     = 0;   // camera scrollX when drag started
+    private panScrollY     = 0;   // camera scrollY when drag started
+    private cameraFrozen   = false; // true = keep camera at panned position until player moves
+
     constructor() { super('OfficeScene'); }
 
     // ── Lifecycle ────────────────────────────────────────────────────────────
@@ -1234,9 +1242,49 @@ export class OfficeScene extends Scene {
             right: this.input.keyboard!.addKey('D'),
         };
         this.eKey = this.input.keyboard!.addKey('E');
+
+        // ── Scroll-wheel zoom ─────────────────────────────────────────────────
         this.input.on('wheel', (_p: unknown, _g: unknown, _dx: number, dy: number) => {
             this.cameras.main.setZoom(clamp(this.cameras.main.zoom - dy * 0.001, 0.3, 2.5));
         });
+
+        // ── Drag-to-pan (left button or middle button) ────────────────────────
+        // Left-click drag pans the camera; releasing freezes it until WASD is used.
+        this.input.on('pointerdown', (ptr: Phaser.Input.Pointer) => {
+            if (ptr.leftButtonDown() || ptr.middleButtonDown()) {
+                this.isPanning    = true;
+                this.panAnchorX   = ptr.x;
+                this.panAnchorY   = ptr.y;
+                this.panScrollX   = this.cameras.main.scrollX;
+                this.panScrollY   = this.cameras.main.scrollY;
+                this.game.canvas.style.cursor = 'grabbing';
+            }
+        });
+
+        this.input.on('pointermove', (ptr: Phaser.Input.Pointer) => {
+            if (!this.isPanning) return;
+            const zoom = this.cameras.main.zoom;
+            this.cameras.main.scrollX = this.panScrollX - (ptr.x - this.panAnchorX) / zoom;
+            this.cameras.main.scrollY = this.panScrollY - (ptr.y - this.panAnchorY) / zoom;
+        });
+
+        this.input.on('pointerup', (ptr: Phaser.Input.Pointer) => {
+            if (this.isPanning && (ptr.leftButtonReleased() || ptr.middleButtonReleased())) {
+                this.isPanning    = false;
+                this.cameraFrozen = true;   // hold position until player moves
+                this.game.canvas.style.cursor = 'grab';
+            }
+        });
+
+        // Also cancel panning if pointer leaves the canvas
+        this.input.on('pointerupoutside', () => {
+            this.isPanning    = false;
+            this.cameraFrozen = true;
+            this.game.canvas.style.cursor = 'grab';
+        });
+
+        // Default cursor = grab hand (signals "draggable")
+        this.game.canvas.style.cursor = 'grab';
     }
 
     private setupEvents() {
@@ -1255,6 +1303,9 @@ export class OfficeScene extends Scene {
         const right = this.cursors.right.isDown || this.wasd.right.isDown;
         if (!up && !down && !left && !right) return;
 
+        // Player moved → unfreeze camera so it follows again
+        this.cameraFrozen = false;
+
         let dx = 0, dy = 0;
         if (up)    { dx -= MOVE_SPD; dy -= MOVE_SPD; }
         if (down)  { dx += MOVE_SPD; dy += MOVE_SPD; }
@@ -1272,6 +1323,10 @@ export class OfficeScene extends Scene {
     }
 
     private trackCamera() {
+        // While dragging or camera is frozen at a panned position, don't follow player.
+        // Camera unfreezes as soon as the player presses a movement key.
+        if (this.isPanning || this.cameraFrozen) return;
+
         const p = this.c2i(this.playerCart.x, this.playerCart.y);
         const cam = this.cameras.main;
         cam.scrollX += (p.x - cam.width  / cam.zoom / 2 - cam.scrollX) * 0.08;
