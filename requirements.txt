@@ -31,7 +31,7 @@ sentry-sdk[fastapi]>=2.7.0
 
 # ── Optional multi-provider LLM clients (install only if you use the provider) ──
 anthropic>=0.30.0
-google-generativeai>=0.7.0
+google-generativeai>=0.8.6
 # vllm>=0.4.0  # Linux + CUDA only — install separately on GPU server
 
 # ── Scheduling & async file I/O ─────────────────────────────────────────────
