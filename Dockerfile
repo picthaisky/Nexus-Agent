@@ -31,10 +31,15 @@ LABEL maintainer="picthaisky <picthaisky@github.com>"
 LABEL org.opencontainers.image.source="https://github.com/picthaisky/Nexus-Agent"
 LABEL org.opencontainers.image.description="Nexus-Agent: Multi-AI Agent Orchestration System"
 
-# Install runtime dependencies only
+# Install runtime dependencies + Node.js 20 LTS
+# Node.js is required so the Executor Agent can run npm / npx / tsc commands
+# when building or initialising JavaScript/TypeScript projects.
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends curl tini git && \
-    rm -rf /var/lib/apt/lists/*
+    apt-get install -y --no-install-recommends curl tini git ca-certificates gnupg && \
+    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+    apt-get install -y --no-install-recommends nodejs && \
+    rm -rf /var/lib/apt/lists/* && \
+    node --version && npm --version
 
 # Create non-root user
 RUN groupadd --gid 1001 nexus && \
