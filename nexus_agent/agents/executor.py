@@ -1,4 +1,4 @@
-"""Executor Agent — runs a plan step using the tool registry, guided by an LLM."""
+"""Executor Agent — runs ALL plan steps using the tool registry, guided by an LLM."""
 from __future__ import annotations
 
 import json
@@ -11,7 +11,6 @@ from nexus_agent.tools.base import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
-# Prompt that asks the LLM to choose a tool and arguments
 _TOOL_SELECTION_PROMPT = """You are an Executor Agent. Your job is to carry out ONE action step using the available tools.
 
 Available tools:
@@ -34,11 +33,12 @@ or if no tool applies:
 
 
 class ExecutorAgent:
-    """Executes the current step of the plan using available tools.
+    """Executes ALL steps of the plan, not just current_step.
 
-    Uses an LLM to parse the step description and choose the right tool
-    from the registry, then invokes it and returns the real output.
-    Falls back to a simulation when no LLM is available.
+    Previously the agent only ran ``state["current_step"]`` (plan[0]), which
+    caused the orchestrator to loop back to the Planner every iteration and
+    repeat the same first step.  Now it iterates through every step in
+    ``state["plan"]`` so the full goal is completed in one Executor pass.
     """
 
     def __init__(self, tool_registry: ToolRegistry) -> None:
@@ -51,21 +51,36 @@ class ExecutorAgent:
 
     # ------------------------------------------------------------------
     def run(self, state: AgentState) -> dict[str, Any]:
-        step = state.get("current_step", "No step provided")
-        logger.info("ExecutorAgent running step: %s", step[:80])
+        plan: list[str] = state.get("plan", [])
+        fallback_step: str = state.get("current_step", "No step provided")
 
-        tool_name, tool_args, tool_output = self._select_and_run_tool(step)
+        # Execute every step in the plan.  If the plan is empty, fall back to
+        # the single current_step so existing callers still work.
+        steps = plan if plan else [fallback_step]
 
-        action_summary = f"[{tool_name}] {step[:60]} → {str(tool_output)[:120]}"
+        all_actions: list[str] = list(state.get("actions_taken", []))  # preserve prior progress
+        all_outputs: list[str] = []
+        messages: list[dict] = []
+
+        for step in steps:
+            logger.info("ExecutorAgent running step: %s", step[:80])
+            tool_name, _tool_args, tool_output = self._select_and_run_tool(step)
+
+            action_summary = f"[{tool_name}] {step[:60]} → {str(tool_output)[:120]}"
+            all_actions.append(action_summary)
+            all_outputs.append(str(tool_output))
+            messages.append({
+                "role": "executor",
+                "content": (
+                    f"Tool '{tool_name}' executed for step: {step}. "
+                    f"Output: {str(tool_output)[:300]}"
+                ),
+            })
+
         return {
-            "actions_taken": [action_summary],
-            "final_output": tool_output,
-            "messages": [
-                {
-                    "role": "executor",
-                    "content": f"Tool '{tool_name}' executed for step: {step}. Output: {str(tool_output)[:300]}",
-                }
-            ],
+            "actions_taken": all_actions,
+            "final_output": "\n\n".join(all_outputs),
+            "messages": messages,
         }
 
     # ------------------------------------------------------------------
@@ -96,14 +111,12 @@ class ExecutorAgent:
                     temperature=0.0,
                 )
                 raw = resp.content.strip()
-                # Extract JSON from possible markdown block
                 match = re.search(r"\{.*\}", raw, re.DOTALL)
                 if match:
                     return json.loads(match.group())
             except Exception as exc:
-                logger.debug("LLM tool selection failed: %s", exc)
+                logger.debug("LLM tool selection failed, using heuristic: %s", exc)
 
-        # Heuristic fallback
         return self._heuristic_decide(step)
 
     @staticmethod
@@ -117,8 +130,14 @@ class ExecutorAgent:
             path = re.search(r"[\w./\\-]+\.\w+", step)
             if path:
                 return {"tool": "read_file", "args": {"file_path": path.group()}}
-        if any(k in sl for k in ("write ", "create file", "save file", "generate file")):
+        if any(k in sl for k in ("write ", "create file", "save file", "generate file", "initialize", "setup")):
             path = re.search(r"[\w./\\-]+\.\w+", step)
             if path:
-                return {"tool": "write_file", "args": {"file_path": path.group(), "content": f"# Auto-generated\n# Step: {step}\n"}}
+                return {
+                    "tool": "write_file",
+                    "args": {
+                        "file_path": path.group(),
+                        "content": f"# Auto-generated\n# Step: {step}\n",
+                    },
+                }
         return {"tool": "none", "args": {}, "note": f"No matching tool for: {step}"}

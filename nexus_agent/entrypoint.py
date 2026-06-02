@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, UploadFile, File, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -96,10 +96,20 @@ async def lifespan(app: FastAPI):
     """Manage startup and shutdown lifecycle events."""
     # Startup
     dashboard_hub.set_loop(asyncio.get_running_loop())
+    try:
+        from nexus_agent.core.scheduler import start_scheduler
+        start_scheduler()
+    except Exception as _sch_exc:
+        logging.getLogger("nexus.startup").warning("Scheduler init failed: %s", _sch_exc)
     
     yield
-    
+
     # Shutdown
+    try:
+        from nexus_agent.core.scheduler import stop_scheduler
+        stop_scheduler()
+    except Exception:
+        pass
     logger = logging.getLogger("nexus.shutdown")
     try:
         await dashboard_hub.broadcast_event(
@@ -162,6 +172,7 @@ app.add_middleware(
 
 class RunTaskRequest(BaseModel):
     goal: str
+    priority: int = Field(default=3, ge=1, le=5)  # 1=highest, 5=lowest
 
 
 class BuildGraphRequest(BaseModel):
@@ -271,6 +282,115 @@ class FinanceRequest(BaseModel):
 
 class ContentRequest(BaseModel):
     topic: str
+
+
+# ── New Specialist Agent Request Models ───────────────────────────────────────
+
+class CodeReviewRequest(BaseModel):
+    target: str
+    context: str = ""
+
+class DebugRequest(BaseModel):
+    error: str
+    context: str = ""
+
+class QATestRequest(BaseModel):
+    target: str
+    framework: str = "pytest"
+
+class DBArchitectRequest(BaseModel):
+    task: str
+    db_type: str = "PostgreSQL"
+
+class DevOpsRequest(BaseModel):
+    task: str
+    stack: str = "Python/FastAPI"
+
+class DataAnalyticsRequest(BaseModel):
+    task: str
+
+class ProjectManagerRequest(BaseModel):
+    project: str
+    context: str = ""
+
+class SecurityAuditRequest(BaseModel):
+    target: str
+    scope: str = "application code"
+
+class TaskTemplateCreate(BaseModel):
+    name: str
+    category: str = "general"
+    description: str = ""
+    goal_template: str
+    tags: list[str] = Field(default_factory=list)
+
+
+# ── New infrastructure request models ─────────────────────────────────────────
+
+class StreamRequest(BaseModel):
+    messages: list[dict[str, str]]
+    provider: str | None = None
+    temperature: float = 0.7
+    max_tokens: int = 2048
+    system: str = ""
+
+
+class RAGRequest(BaseModel):
+    question: str
+    top_k: int = 5
+    doc_id: str | None = None
+
+
+class APIIntegrationRequest(BaseModel):
+    task: str
+    test_url: str = ""
+    auth_type: str = "bearer_token"
+
+
+class SchedulerJobCreate(BaseModel):
+    name: str
+    goal_template: str
+    cron_expr: str  # e.g. "0 9 * * 1-5"
+    timezone: str = "Asia/Bangkok"
+    tags: list[str] = Field(default_factory=list)
+
+
+class NotificationTestRequest(BaseModel):
+    channel: str = "email"  # "email" | "line"
+    to: str = ""
+
+
+class PromptVersionCreate(BaseModel):
+    agent_role: str
+    name: str
+    content: str
+    notes: str = ""
+
+
+class WorkspaceCreate(BaseModel):
+    name: str
+    description: str = ""
+
+
+class WorkspaceKeyCreate(BaseModel):
+    workspace_id: str
+    label: str
+    permission: str = "operator"  # viewer | operator | admin
+
+
+class WebhookCreate(BaseModel):
+    name: str
+    goal_template: str
+
+
+class ChatSessionCreate(BaseModel):
+    title: str = "New Chat"
+    agent_role: str = "planner"
+
+
+class ChatMessageRequest(BaseModel):
+    content: str
+    stream: bool = False
 
 
 class ConnectRepoRequest(BaseModel):
@@ -747,6 +867,244 @@ async def finance_analyze(
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+# ── New Specialist Agent Endpoints ───────────────────────────────────────────
+
+def _run_agent(agent_cls, payload: dict) -> dict:
+    """Instantiate a standalone specialist agent and run it."""
+    agent = agent_cls()
+    result = agent.run(payload)
+    return result.model_dump()
+
+
+@app.post("/agents/code-review", tags=["specialist"])
+async def code_review(request: CodeReviewRequest, _: Principal = Depends(require_api_key)):
+    """Review code quality, security, and best practices via CodeReviewerAgent."""
+    try:
+        from nexus_agent.agents.code_reviewer import CodeReviewerAgent
+        return _run_agent(CodeReviewerAgent, {"target": request.target, "context": request.context})
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/agents/debug", tags=["specialist"])
+async def debug_error(request: DebugRequest, _: Principal = Depends(require_api_key)):
+    """Diagnose errors and propose fixes via DebuggerAgent."""
+    try:
+        from nexus_agent.agents.debugger_agent import DebuggerAgent
+        return _run_agent(DebuggerAgent, {"error": request.error, "context": request.context})
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/agents/qa-test", tags=["specialist"])
+async def qa_test(request: QATestRequest, _: Principal = Depends(require_api_key)):
+    """Generate comprehensive test suites via QATestingAgent."""
+    try:
+        from nexus_agent.agents.qa_testing_agent import QATestingAgent
+        return _run_agent(QATestingAgent, {"target": request.target, "framework": request.framework})
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/agents/database-design", tags=["specialist"])
+async def database_design(request: DBArchitectRequest, _: Principal = Depends(require_api_key)):
+    """Design database schemas and migrations via DatabaseArchitectAgent."""
+    try:
+        from nexus_agent.agents.database_architect import DatabaseArchitectAgent
+        return _run_agent(DatabaseArchitectAgent, {"task": request.task, "db_type": request.db_type})
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/agents/devops", tags=["specialist"])
+async def devops_generate(request: DevOpsRequest, _: Principal = Depends(require_api_key)):
+    """Generate Dockerfiles, CI/CD pipelines, and deployment configs via DevOpsAgent."""
+    try:
+        from nexus_agent.agents.devops_agent import DevOpsAgent
+        return _run_agent(DevOpsAgent, {"task": request.task, "stack": request.stack})
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/agents/data-analytics", tags=["specialist"])
+async def data_analytics(request: DataAnalyticsRequest, _: Principal = Depends(require_api_key)):
+    """Analyse data and generate insights via DataAnalyticsAgent."""
+    try:
+        from nexus_agent.agents.data_analytics_agent import DataAnalyticsAgent
+        return _run_agent(DataAnalyticsAgent, {"task": request.task})
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/agents/project-status", tags=["specialist"])
+async def project_status(request: ProjectManagerRequest, _: Principal = Depends(require_api_key)):
+    """Generate project status reports and task breakdowns via ProjectManagerAgent."""
+    try:
+        from nexus_agent.agents.project_manager_agent import ProjectManagerAgent
+        return _run_agent(ProjectManagerAgent, {"project": request.project, "context": request.context})
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/agents/security-audit", tags=["specialist"])
+async def security_audit(request: SecurityAuditRequest, _: Principal = Depends(require_api_key)):
+    """Run OWASP security audit via SecurityAuditAgent."""
+    try:
+        from nexus_agent.agents.security_audit_agent import SecurityAuditAgent
+        return _run_agent(SecurityAuditAgent, {"target": request.target, "scope": request.scope})
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+# ── Task Templates ────────────────────────────────────────────────────────────
+
+@app.get("/templates", tags=["templates"])
+async def list_templates(category: str | None = None, _: Principal = Depends(require_api_key)):
+    return {"templates": task_store.list_templates(category=category)}
+
+@app.post("/templates", tags=["templates"])
+async def create_template(request: TaskTemplateCreate, _: Principal = Depends(require_api_key)):
+    import uuid as _uuid2
+    tid = str(_uuid2.uuid4())
+    row = task_store.upsert_template(
+        template_id=tid, name=request.name, category=request.category,
+        description=request.description, goal_template=request.goal_template, tags=request.tags,
+    )
+    return row
+
+@app.get("/templates/{template_id}", tags=["templates"])
+async def get_template(template_id: str, _: Principal = Depends(require_api_key)):
+    t = task_store.get_template(template_id)
+    if not t: raise HTTPException(status_code=404, detail="Template not found")
+    return t
+
+@app.delete("/templates/{template_id}", tags=["templates"])
+async def delete_template(template_id: str, _: Principal = Depends(require_api_key)):
+    if not task_store.delete_template(template_id):
+        raise HTTPException(status_code=404, detail="Template not found")
+    return {"status": "deleted", "template_id": template_id}
+
+@app.post("/templates/{template_id}/use", tags=["templates"])
+async def use_template(
+    template_id: str,
+    variables: dict = {},
+    background_tasks: BackgroundTasks = None,
+    _: Principal = Depends(require_api_key),
+):
+    """Expand a template with variables and submit as a task."""
+    t = task_store.get_template(template_id)
+    if not t: raise HTTPException(status_code=404, detail="Template not found")
+    goal = t["goal_template"]
+    for k, v in (variables or {}).items():
+        goal = goal.replace(f"{{{{{k}}}}}", str(v))
+    task_store.increment_template_usage(template_id)
+    import uuid as _uuid3
+    from datetime import datetime as _dt2, timezone as _tz2
+    task_id = str(_uuid3.uuid4())
+    task_store.create_task(task_id=task_id, goal=goal)
+    if background_tasks:
+        background_tasks.add_task(_run_orchestrator, goal, task_id)
+    return {"status": "accepted", "goal": goal, "task_id": task_id, "template_id": template_id}
+
+
+# ── File Upload ───────────────────────────────────────────────────────────────
+
+@app.post("/files/upload", tags=["files"])
+async def upload_file(
+    file: UploadFile = File(...),
+    task_id: str | None = None,
+    _: Principal = Depends(require_api_key),
+):
+    """Upload a file (PDF, CSV, text, code) for use by agents."""
+    import uuid as _uuid4
+    file_id = str(_uuid4.uuid4())
+    upload_dir = _DATA_DIR / "uploads"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    suffix = Path(file.filename or "upload").suffix or ".bin"
+    storage_path = str(upload_dir / f"{file_id}{suffix}")
+    content = await file.read()
+    Path(storage_path).write_bytes(content)
+    row = task_store.register_upload(
+        file_id=file_id,
+        filename=file.filename or "upload",
+        content_type=file.content_type or "application/octet-stream",
+        size_bytes=len(content),
+        storage_path=storage_path,
+        task_id=task_id,
+    )
+    return {**row, "storage_path": None}  # omit internal path from response
+
+@app.get("/files", tags=["files"])
+async def list_files(task_id: str | None = None, _: Principal = Depends(require_api_key)):
+    files = task_store.list_uploads(task_id=task_id)
+    for f in files: f.pop("storage_path", None)
+    return {"files": files}
+
+@app.delete("/files/{file_id}", tags=["files"])
+async def delete_file(file_id: str, _: Principal = Depends(require_api_key)):
+    upload = task_store.get_upload(file_id)
+    if not upload: raise HTTPException(status_code=404, detail="File not found")
+    try: Path(upload["storage_path"]).unlink(missing_ok=True)
+    except Exception: pass
+    task_store.delete_upload(file_id)
+    return {"status": "deleted", "file_id": file_id}
+
+@app.get("/files/{file_id}/content", tags=["files"])
+async def get_file_content(file_id: str, _: Principal = Depends(require_api_key)):
+    """Return the text content of an uploaded file (for agent context injection)."""
+    upload = task_store.get_upload(file_id)
+    if not upload: raise HTTPException(status_code=404, detail="File not found")
+    try:
+        content = Path(upload["storage_path"]).read_text(encoding="utf-8", errors="replace")
+        return {"file_id": file_id, "filename": upload["filename"], "content": content[:50000]}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+# ── API Cost Dashboard ────────────────────────────────────────────────────────
+
+@app.get("/costs/summary", tags=["costs"])
+async def cost_summary(since: str | None = None, _: Principal = Depends(require_api_key)):
+    """Return aggregated API cost summary by provider/model."""
+    return task_store.get_cost_summary(since_iso=since)
+
+@app.get("/costs/log", tags=["costs"])
+async def cost_log(limit: int = 100, _: Principal = Depends(require_api_key)):
+    """Return raw API call log for detailed inspection."""
+    return {"log": task_store.list_cost_log(limit=limit)}
+
+
+# ── Streaming Task Output (SSE) ───────────────────────────────────────────────
+
+@app.get("/tasks/{task_id}/stream", tags=["orchestrator"])
+async def stream_task_logs(task_id: str, _: Principal = Depends(require_api_key)):
+    """Stream live log events for a running task via Server-Sent Events."""
+    from fastapi.responses import StreamingResponse
+    import asyncio, json as _json
+
+    async def event_generator():
+        last_count = 0
+        task = task_store.get_task(task_id)
+        if not task:
+            yield f"data: {_json.dumps({'error': 'Task not found'})}\n\n"
+            return
+
+        for _ in range(300):  # max 5 minutes
+            task = task_store.get_task(task_id)
+            if not task: break
+            yield f"data: {_json.dumps({'status': task['status'], 'task_id': task_id})}\n\n"
+            if task["status"] in ("completed", "failed", "cancelled"):
+                yield f"data: {_json.dumps({'event': 'done', 'status': task['status']})}\n\n"
+                break
+            await asyncio.sleep(1)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @app.post("/agents/content/generate", tags=["specialist"])
 async def content_generate(
     request: ContentRequest,
@@ -1196,6 +1554,16 @@ def _run_orchestrator(goal: str, task_id: str) -> None:
         task_store.update_task(task_id, status="completed", finished_at=_dt.now(_tz.utc).isoformat())
         # Reset all agents to IDLE
         _emit_all_agents(_AMS.COMPLETED, "Task completed ✅")
+        # Send completion notification (email / LINE) — non-blocking
+        try:
+            import asyncio as _aio
+            from nexus_agent.core.notifications import notify_task_complete as _notify
+            _aio.run_coroutine_threadsafe(
+                _notify(task_id, goal, "completed"),
+                dashboard_hub._loop,
+            ) if dashboard_hub._loop and dashboard_hub._loop.is_running() else None
+        except Exception as _ne:
+            logger_.debug("Notification failed (non-critical): %s", _ne)
     except Exception as exc:
         tb = traceback.format_exc()
         logger_.error("Orchestrator failed task %s: %s\n%s", task_id, exc, tb)
@@ -1212,6 +1580,16 @@ def _run_orchestrator(goal: str, task_id: str) -> None:
         )
         # Reset all agents to ERROR then IDLE
         _emit_all_agents(_AMS.ERROR, f"Task failed: {short_err[:60]}")
+        # Send failure notification
+        try:
+            import asyncio as _aio2
+            from nexus_agent.core.notifications import notify_task_complete as _notify2
+            _aio2.run_coroutine_threadsafe(
+                _notify2(task_id, goal, "failed", str(exc)[:200]),
+                dashboard_hub._loop,
+            ) if dashboard_hub._loop and dashboard_hub._loop.is_running() else None
+        except Exception as _ne2:
+            logger_.debug("Failure notification failed (non-critical): %s", _ne2)
 
 
 @app.post("/tasks/run", tags=["orchestrator"])
@@ -1222,9 +1600,9 @@ async def run_task(
 ):
     """Submits a task to the Orchestrator for background execution."""
     task_id = str(_uuid.uuid4())
-    task_store.create_task(task_id=task_id, goal=request.goal)
+    task_store.create_task(task_id=task_id, goal=request.goal, priority=request.priority)
     background_tasks.add_task(_run_orchestrator, request.goal, task_id)
-    return {"status": "accepted", "goal": request.goal, "task_id": task_id}
+    return {"status": "accepted", "goal": request.goal, "task_id": task_id, "priority": request.priority}
 
 
 @app.get("/tasks", tags=["orchestrator"])
@@ -1604,3 +1982,365 @@ async def tiktok_exchange_code(
     except Exception as exc:
         logger.error("tiktok_exchange_code_failed: %s", exc)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# NEW INFRASTRUCTURE ENDPOINTS
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── Streaming LLM (SSE) ───────────────────────────────────────────────────────
+
+from fastapi.responses import StreamingResponse as _StreamResp
+
+@app.post("/inference/stream", tags=["inference"])
+async def stream_inference_endpoint(
+    request: StreamRequest,
+    _: Principal = Depends(require_api_key),
+):
+    """Stream LLM tokens via Server-Sent Events (text/event-stream).
+
+    Each event is a JSON object ``{"token": "..."}`` followed by ``[DONE]``.
+    """
+    from nexus_agent.core.streaming import stream_inference
+    return _StreamResp(
+        stream_inference(
+            request.messages,
+            provider=request.provider,
+            temperature=request.temperature,
+            max_tokens=request.max_tokens,
+            system=request.system,
+        ),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+# ── Vector Store / Knowledge Base ─────────────────────────────────────────────
+
+@app.get("/kb/stats", tags=["knowledge-base"])
+async def kb_stats(_: Principal = Depends(require_api_key)):
+    from nexus_agent.core.vector_store import vector_store as vs
+    return vs.stats()
+
+@app.get("/kb/documents", tags=["knowledge-base"])
+async def kb_list(_: Principal = Depends(require_api_key)):
+    from nexus_agent.core.vector_store import vector_store as vs
+    return {"documents": vs.list_documents()}
+
+@app.delete("/kb/documents/{doc_id}", tags=["knowledge-base"])
+async def kb_delete(doc_id: str, _: Principal = Depends(require_api_key)):
+    from nexus_agent.core.vector_store import vector_store as vs
+    if not vs.delete_document(doc_id):
+        raise HTTPException(status_code=404, detail="Document not found")
+    return {"status": "deleted", "doc_id": doc_id}
+
+@app.post("/kb/search", tags=["knowledge-base"])
+async def kb_search(request: RAGRequest, _: Principal = Depends(require_api_key)):
+    from nexus_agent.core.vector_store import vector_store as vs
+    results = vs.search(request.question, top_k=request.top_k)
+    return {"query": request.question, "results": results}
+
+@app.post("/kb/ask", tags=["knowledge-base"])
+async def kb_ask(request: RAGRequest, _: Principal = Depends(require_api_key)):
+    """Ask a question — retrieves context then generates an LLM answer."""
+    from nexus_agent.agents.rag_agent import RAGAgent
+    agent = RAGAgent()
+    result = agent.run({"question": request.question, "top_k": request.top_k, "doc_id": request.doc_id})
+    return result
+
+@app.post("/kb/ingest-file/{file_id}", tags=["knowledge-base"])
+async def kb_ingest_file(file_id: str, title: str = "", _: Principal = Depends(require_api_key)):
+    """Ingest an uploaded file into the Knowledge Base for RAG retrieval."""
+    upload = task_store.get_upload(file_id)
+    if not upload:
+        raise HTTPException(status_code=404, detail="File not found")
+    try:
+        text = Path(upload["storage_path"]).read_text(encoding="utf-8", errors="replace")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    from nexus_agent.core.vector_store import vector_store as vs
+    n_chunks = vs.add_document(
+        doc_id=file_id,
+        text=text,
+        title=title or upload["filename"],
+        source=upload["filename"],
+        content_type=upload["content_type"],
+    )
+    return {"doc_id": file_id, "filename": upload["filename"], "chunks_indexed": n_chunks}
+
+
+# ── RAG + API Integration Agents ──────────────────────────────────────────────
+
+@app.post("/agents/api-integration", tags=["specialist"])
+async def api_integration(request: APIIntegrationRequest, _: Principal = Depends(require_api_key)):
+    """Generate API client code and validate an endpoint via APIIntegrationAgent."""
+    from nexus_agent.agents.api_integration_agent import APIIntegrationAgent
+    agent = APIIntegrationAgent()
+    return agent.run({"task": request.task, "test_url": request.test_url, "auth_type": request.auth_type})
+
+
+# ── Scheduler (Cron Jobs) ─────────────────────────────────────────────────────
+
+@app.get("/scheduler/jobs", tags=["scheduler"])
+async def list_jobs(_: Principal = Depends(require_api_key)):
+    from nexus_agent.core.scheduler import scheduler_store
+    return {"jobs": scheduler_store.list_jobs()}
+
+@app.post("/scheduler/jobs", tags=["scheduler"])
+async def create_job(request: SchedulerJobCreate, _: Principal = Depends(require_api_key)):
+    from nexus_agent.core.scheduler import add_job
+    try:
+        job = add_job(
+            job_id=str(_uuid.uuid4()),
+            name=request.name,
+            goal_template=request.goal_template,
+            cron_expr=request.cron_expr,
+            timezone_str=request.timezone,
+        )
+        return job
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid cron expression or scheduler error: {exc}") from exc
+
+@app.delete("/scheduler/jobs/{job_id}", tags=["scheduler"])
+async def delete_job(job_id: str, _: Principal = Depends(require_api_key)):
+    from nexus_agent.core.scheduler import remove_job
+    if not remove_job(job_id):
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {"status": "deleted", "job_id": job_id}
+
+@app.post("/scheduler/jobs/{job_id}/toggle", tags=["scheduler"])
+async def toggle_job(job_id: str, enabled: bool = True, _: Principal = Depends(require_api_key)):
+    from nexus_agent.core.scheduler import scheduler_store, get_scheduler
+    if not scheduler_store.toggle_job(job_id, enabled):
+        raise HTTPException(status_code=404, detail="Job not found")
+    sched = get_scheduler()
+    if sched and sched.running:
+        try:
+            if enabled: sched.resume_job(job_id)
+            else:       sched.pause_job(job_id)
+        except Exception: pass
+    return {"status": "enabled" if enabled else "disabled", "job_id": job_id}
+
+
+# ── Notifications ─────────────────────────────────────────────────────────────
+
+@app.post("/notifications/test", tags=["notifications"])
+async def test_notification(request: NotificationTestRequest, _: Principal = Depends(require_api_key)):
+    """Send a test notification to verify Email or LINE Notify configuration."""
+    from nexus_agent.core.notifications import test_email, test_line
+    if request.channel == "email":
+        result = await test_email({"to": request.to} if request.to else None)
+    elif request.channel == "line":
+        result = await test_line()
+    else:
+        raise HTTPException(status_code=400, detail="channel must be 'email' or 'line'")
+    return result
+
+@app.get("/notifications/config", tags=["notifications"])
+async def get_notification_config(_: Principal = Depends(require_api_key)):
+    """Return current notification configuration (secrets masked)."""
+    s = settings
+    return {
+        "email": {
+            "configured": bool(s.smtp_host and s.smtp_user),
+            "smtp_host":  s.smtp_host,
+            "smtp_port":  s.smtp_port,
+            "smtp_user":  s.smtp_user,
+            "smtp_from":  s.smtp_from,
+            "use_tls":    s.smtp_use_tls,
+            "notification_email": s.notification_email,
+        },
+        "line": {
+            "configured": bool(s.line_notify_token),
+            "token_set":  bool(s.line_notify_token),
+        },
+    }
+
+
+# ── Webhooks (incoming HTTP triggers) ────────────────────────────────────────
+
+@app.get("/webhooks", tags=["webhooks"])
+async def list_webhooks(_: Principal = Depends(require_api_key)):
+    return {"webhooks": task_store.list_webhooks()}
+
+@app.post("/webhooks", tags=["webhooks"])
+async def create_webhook(request: WebhookCreate, _: Principal = Depends(require_api_key)):
+    return task_store.create_webhook(request.name, request.goal_template)
+
+@app.delete("/webhooks/{webhook_id}", tags=["webhooks"])
+async def delete_webhook(webhook_id: str, _: Principal = Depends(require_api_key)):
+    if not task_store.delete_webhook(webhook_id):
+        raise HTTPException(status_code=404, detail="Webhook not found")
+    return {"status": "deleted", "webhook_id": webhook_id}
+
+@app.post("/hooks/{webhook_id}", tags=["webhooks"])
+async def trigger_webhook(
+    webhook_id: str,
+    background_tasks: BackgroundTasks,
+    request: Request,
+    token: str | None = None,
+):
+    """Public webhook trigger endpoint (no auth header required — validated by secret token)."""
+    wh = task_store.get_webhook(webhook_id)
+    if not wh or not wh.get("enabled"):
+        raise HTTPException(status_code=404, detail="Webhook not found or disabled")
+    if token and token != wh.get("secret_token"):
+        raise HTTPException(status_code=403, detail="Invalid webhook token")
+    task_store.increment_webhook_hit(webhook_id)
+    task_id = str(_uuid.uuid4())
+    goal    = wh["goal_template"]
+    task_store.create_task(task_id=task_id, goal=goal)
+    background_tasks.add_task(_run_orchestrator, goal, task_id)
+    return {"status": "accepted", "task_id": task_id, "goal": goal}
+
+
+# ── Chat / Conversation Sessions ──────────────────────────────────────────────
+
+@app.post("/chat/sessions", tags=["chat"])
+async def create_chat_session(request: ChatSessionCreate, _: Principal = Depends(require_api_key)):
+    return task_store.create_chat_session(request.title, request.agent_role)
+
+@app.get("/chat/sessions", tags=["chat"])
+async def list_chat_sessions(_: Principal = Depends(require_api_key)):
+    return {"sessions": task_store.list_chat_sessions()}
+
+@app.delete("/chat/sessions/{session_id}", tags=["chat"])
+async def delete_chat_session(session_id: str, _: Principal = Depends(require_api_key)):
+    if not task_store.delete_chat_session(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    return {"status": "deleted", "session_id": session_id}
+
+@app.get("/chat/sessions/{session_id}/messages", tags=["chat"])
+async def get_chat_history(session_id: str, _: Principal = Depends(require_api_key)):
+    return {"messages": task_store.get_chat_history(session_id)}
+
+@app.post("/chat/sessions/{session_id}/messages", tags=["chat"])
+async def chat_message(
+    session_id: str,
+    request: ChatMessageRequest,
+    _: Principal = Depends(require_api_key),
+):
+    """Send a message and get a streaming or non-streaming LLM response."""
+    task_store.add_chat_message(session_id, "user", request.content)
+    history = task_store.get_chat_history(session_id, limit=20)
+    messages = [{"role": m["role"], "content": m["content"]} for m in history]
+
+    if request.stream:
+        from nexus_agent.core.streaming import stream_inference
+        async def _gen():
+            import json as _json
+            full = []
+            async for chunk in stream_inference(messages):
+                yield chunk
+                try:
+                    d = _json.loads(chunk.replace("data: ", "").strip())
+                    if "token" in d: full.append(d["token"])
+                except Exception: pass
+            task_store.add_chat_message(session_id, "assistant", "".join(full))
+        return _StreamResp(_gen(), media_type="text/event-stream",
+                           headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+    # Non-streaming
+    try:
+        engine = get_inference_engine()
+        resp_text = engine.generate(messages, temperature=0.7)
+    except Exception as exc:
+        resp_text = f"⚠️ LLM error: {exc}"
+    task_store.add_chat_message(session_id, "assistant", resp_text)
+    return {"role": "assistant", "content": resp_text, "session_id": session_id}
+
+
+# ── Prompt Version Control ────────────────────────────────────────────────────
+
+@app.get("/prompts", tags=["prompts"])
+async def list_prompts(agent_role: str | None = None, _: Principal = Depends(require_api_key)):
+    from nexus_agent.core.prompt_store import prompt_store
+    return {"versions": prompt_store.list_versions(agent_role)}
+
+@app.post("/prompts", tags=["prompts"])
+async def create_prompt(request: PromptVersionCreate, _: Principal = Depends(require_api_key)):
+    from nexus_agent.core.prompt_store import prompt_store
+    return prompt_store.create_version(request.agent_role, request.name, request.content, request.notes)
+
+@app.post("/prompts/{version_id}/activate", tags=["prompts"])
+async def activate_prompt(version_id: str, _: Principal = Depends(require_api_key)):
+    from nexus_agent.core.prompt_store import prompt_store
+    if not prompt_store.activate_version(version_id):
+        raise HTTPException(status_code=404, detail="Version not found")
+    return {"status": "activated", "version_id": version_id}
+
+@app.delete("/prompts/{version_id}", tags=["prompts"])
+async def delete_prompt(version_id: str, _: Principal = Depends(require_api_key)):
+    from nexus_agent.core.prompt_store import prompt_store
+    if not prompt_store.delete_version(version_id):
+        raise HTTPException(status_code=404, detail="Version not found")
+    return {"status": "deleted", "version_id": version_id}
+
+
+# ── Multi-workspace + RBAC ────────────────────────────────────────────────────
+
+@app.get("/workspaces", tags=["workspaces"])
+async def list_workspaces(_: Principal = Depends(require_api_key)):
+    from nexus_agent.core.workspace import workspace_store
+    return {"workspaces": workspace_store.list_workspaces()}
+
+@app.post("/workspaces", tags=["workspaces"])
+async def create_workspace(request: WorkspaceCreate, _: Principal = Depends(require_api_key)):
+    from nexus_agent.core.workspace import workspace_store
+    return workspace_store.create_workspace(request.name, request.description)
+
+@app.delete("/workspaces/{workspace_id}", tags=["workspaces"])
+async def delete_workspace(workspace_id: str, _: Principal = Depends(require_api_key)):
+    from nexus_agent.core.workspace import workspace_store
+    if not workspace_store.delete_workspace(workspace_id):
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    return {"status": "deleted", "workspace_id": workspace_id}
+
+@app.get("/workspaces/{workspace_id}/keys", tags=["workspaces"])
+async def list_workspace_keys(workspace_id: str, _: Principal = Depends(require_api_key)):
+    from nexus_agent.core.workspace import workspace_store
+    return {"keys": workspace_store.list_keys(workspace_id)}
+
+@app.post("/workspaces/keys", tags=["workspaces"])
+async def create_workspace_key(request: WorkspaceKeyCreate, _: Principal = Depends(require_api_key)):
+    from nexus_agent.core.workspace import workspace_store
+    return workspace_store.create_key(request.workspace_id, request.label, request.permission)
+
+@app.delete("/workspaces/keys/{key_id}", tags=["workspaces"])
+async def revoke_workspace_key(key_id: str, _: Principal = Depends(require_api_key)):
+    from nexus_agent.core.workspace import workspace_store
+    if not workspace_store.revoke_key(key_id):
+        raise HTTPException(status_code=404, detail="Key not found")
+    return {"status": "revoked", "key_id": key_id}
+
+
+# ── Model Provider Configuration (read-only inspection) ──────────────────────
+
+@app.get("/models/providers", tags=["models"])
+async def list_model_providers(_: Principal = Depends(require_api_key)):
+    """Return active LLM providers with their status."""
+    engine = get_inference_engine()
+    providers_detail = engine.list_providers() if engine else []
+    return {
+        "providers": providers_detail,
+        "env_configured": {
+            "openai":     bool(os.environ.get("OPENAI_API_KEY")),
+            "anthropic":  bool(os.environ.get("ANTHROPIC_API_KEY")),
+            "gemini":     bool(os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")),
+            "vllm":       os.environ.get("VLLM_ENABLED","false").lower() in ("1","true","yes"),
+        },
+    }
+
+@app.post("/models/test/{provider}", tags=["models"])
+async def test_model_provider(provider: str, _: Principal = Depends(require_api_key)):
+    """Send a minimal test message to a specific provider."""
+    try:
+        engine = get_inference_engine()
+        resp = engine.generate_detailed(
+            [{"role":"user","content":"Reply with exactly: OK"}],
+            provider=provider, max_tokens=10, temperature=0.0,
+        )
+        return {"ok": True, "provider": provider, "response": resp.content,
+                "tokens_in": resp.tokens_in, "tokens_out": resp.tokens_out}
+    except Exception as exc:
+        return {"ok": False, "provider": provider, "error": str(exc)}

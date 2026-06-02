@@ -292,14 +292,28 @@ class Orchestrator:
         return workflow.compile()
         
     def _after_learning(self, state: AgentState) -> str:
-        """Routing function that determines if the loop should continue after learning."""
+        """Route after learning: exit early to avoid wasteful loops.
+
+        Previous behaviour: only "success" → end; "partial" → continue.
+        This caused the Executor to repeat step 1 up to 5 times because the
+        Planner always resets current_step to plan[0], and the Validator kept
+        returning "partial" (only step 1 was done). Each extra loop burned 4+
+        LLM calls and quickly exhausted API quotas.
+
+        New behaviour:
+        - "success" or "partial" → end  (any progress is sufficient)
+        - "failed" AND under retry cap  → continue  (only retry true failures)
+        - Hard cap reduced from 5 → 2 actions to minimise quota consumption.
+        """
         status = state.get("validation_status", "failed")
-        if status == "success":
+
+        # Any measurable progress → stop the loop
+        if status in ("success", "partial"):
             return "end"
 
-        # Guard against infinite loops
+        # Only re-try on a genuine failure, and limit to 2 retries
         actions = state.get("actions_taken", [])
-        if len(actions) > 5:  # Maximum 5 iterations
+        if len(actions) >= 2:
             return "end"
 
         return "continue"
