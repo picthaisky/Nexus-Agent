@@ -439,17 +439,48 @@ class InferenceEngine:
 
         last_exc: Optional[Exception] = None
         for adapter in chain:
+            import time as _time
+            _t0 = _time.monotonic()
             try:
                 from nexus_agent.core.resilience import resilient_call
 
-                return resilient_call(
+                result = resilient_call(
                     f"llm:{adapter.cfg.name}",
                     adapter.generate,
                     messages,
                     temperature=temperature,
                     max_tokens=max_tokens,
                 )
+                # Cost tracking — best-effort, never raises
+                try:
+                    from nexus_agent.core.task_store import task_store as _ts
+                    from nexus_agent.core.cost import estimate_cost as _ec
+                    latency_ms = (_time.monotonic() - _t0) * 1000
+                    cost_est = _ec(adapter.cfg.model, result.tokens_in, result.tokens_out)
+                    cost = cost_est.total_usd
+                    _ts.log_api_call(
+                        provider=adapter.cfg.name,
+                        model=adapter.cfg.model,
+                        tokens_in=result.tokens_in,
+                        tokens_out=result.tokens_out,
+                        cost_usd=cost,
+                        latency_ms=latency_ms,
+                        status="success",
+                    )
+                except Exception:
+                    pass
+                return result
             except Exception as exc:
+                try:
+                    from nexus_agent.core.task_store import task_store as _ts2
+                    _ts2.log_api_call(
+                        provider=adapter.cfg.name,
+                        model=adapter.cfg.model,
+                        latency_ms=(_time.monotonic() - _t0) * 1000,
+                        status="failed",
+                    )
+                except Exception:
+                    pass
                 logger.error("Provider %s failed: %s", adapter.cfg.name, exc)
                 last_exc = exc
                 continue

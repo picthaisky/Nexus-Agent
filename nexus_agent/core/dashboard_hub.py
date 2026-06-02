@@ -60,12 +60,24 @@ class DashboardHub:
 
     # The agents the dashboard expects (Cyber-Thai roster of 6)
     DEFAULT_ROSTER: List[tuple[str, AgentRole, str]] = [
-        ("planner", AgentRole.PLANNER, "เสนาบดีไซเบอร์ / Planner"),
-        ("architect", AgentRole.TECHNICAL_ARCHITECT, "พระวิศวกรรม / Architect"),
-        ("developer", AgentRole.DEVELOPER, "วานรล้ำยุค / Developer"),
-        ("ui_weaver", AgentRole.UI_WEAVER, "นางอัปสรทอแสง / UI Weaver"),
-        ("validator", AgentRole.VALIDATOR, "ยักษ์ทวารบาล / Validator"),
-        ("optimizer", AgentRole.AUTONOMOUS_OPTIMIZER, "ฤาษีดิจิทัล / Optimizer"),
+        # Core orchestration agents
+        ("planner",        AgentRole.PLANNER,               "เสนาบดีไซเบอร์ / Planner"),
+        ("architect",      AgentRole.TECHNICAL_ARCHITECT,   "พระวิศวกรรม / Architect"),
+        ("developer",      AgentRole.DEVELOPER,             "วานรล้ำยุค / Developer"),
+        ("ui_weaver",      AgentRole.UI_WEAVER,             "นางอัปสรทอแสง / UI Weaver"),
+        ("validator",      AgentRole.VALIDATOR,             "ยักษ์ทวารบาล / Validator"),
+        ("optimizer",      AgentRole.AUTONOMOUS_OPTIMIZER,  "ฤาษีดิจิทัล / Optimizer"),
+        # New specialist agents
+        ("code_reviewer",  AgentRole.CODE_REVIEWER,         "นักตรวจโค้ด / Code Reviewer"),
+        ("debugger",       AgentRole.DEBUGGER,              "นักสืบดิจิทัล / Debugger"),
+        ("qa_tester",      AgentRole.QA_TESTER,             "ผู้ทดสอบระบบ / QA Tester"),
+        ("db_architect",   AgentRole.DATABASE_ARCHITECT,    "สถาปนิก DB / DB Architect"),
+        ("devops",         AgentRole.DEVOPS_AGENT,          "วิศวกร DevOps / DevOps"),
+        ("data_analyst",   AgentRole.DATA_ANALYST,          "นักวิเคราะห์ข้อมูล / Data Analyst"),
+        ("project_mgr",    AgentRole.PROJECT_MANAGER,       "ผู้จัดการโครงการ / Project Manager"),
+        ("security",       AgentRole.SECURITY_AUDITOR,      "ผู้ตรวจความปลอดภัย / Security Auditor"),
+        ("rag_agent",      AgentRole.RAG_AGENT,             "ผู้ค้นหาความรู้ / RAG Agent"),
+        ("api_integration",AgentRole.API_INTEGRATION,       "นักเชื่อมต่อ API / API Integration"),
     ]
 
     def __init__(self) -> None:

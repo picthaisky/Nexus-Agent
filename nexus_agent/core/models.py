@@ -30,6 +30,17 @@ class AgentRole(str, Enum):
     SEARCH_AGENT = "search_agent"
     FINANCE_AGENT = "finance_agent"
     CONTENT_CREATOR_AGENT = "content_creator_agent"
+    # New specialist agents
+    CODE_REVIEWER       = "code_reviewer"
+    DEBUGGER            = "debugger"
+    QA_TESTER           = "qa_tester"
+    DATABASE_ARCHITECT  = "database_architect"
+    DEVOPS_AGENT        = "devops_agent"
+    DATA_ANALYST        = "data_analyst"
+    PROJECT_MANAGER     = "project_manager"
+    SECURITY_AUDITOR    = "security_auditor"
+    RAG_AGENT           = "rag_agent"
+    API_INTEGRATION     = "api_integration"
 
 
 class TaskStatus(str, Enum):
@@ -210,5 +221,144 @@ class ContentCreationResult(BaseModel):
     """Output produced by the Content Creator Agent."""
     topic: str
     content_md: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+# ── New Specialist Agent Result Models ────────────────────────────────────────
+
+class CodeIssue(BaseModel):
+    """A single code review finding."""
+    severity: str  # critical / major / minor / info
+    file_path: str
+    line: str
+    category: str  # security / performance / style / logic / maintainability
+    description: str
+    suggestion: str
+
+
+class CodeReviewResult(BaseModel):
+    """Output produced by the Code Reviewer Agent."""
+    target: str
+    summary_md: str
+    issues: list[CodeIssue] = Field(default_factory=list)
+    score: int = 0         # 0-100
+    approved: bool = False
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class DebugReport(BaseModel):
+    """Output produced by the Debugger Agent."""
+    error_input: str
+    root_cause: str
+    analysis_md: str
+    fix_suggestions: list[str] = Field(default_factory=list)
+    affected_files: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class TestCase(BaseModel):
+    """A generated test case."""
+    name: str
+    test_type: str   # unit / integration / e2e
+    description: str
+    code: str
+    file_path: str
+
+
+class QATestingResult(BaseModel):
+    """Output produced by the QA Testing Agent."""
+    target: str
+    summary_md: str
+    test_cases: list[TestCase] = Field(default_factory=list)
+    coverage_estimate: str = ""
+    commands: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class DBTable(BaseModel):
+    """A database table definition."""
+    name: str
+    columns: list[str]
+    indexes: list[str] = Field(default_factory=list)
+    relationships: list[str] = Field(default_factory=list)
+
+
+class DatabaseSchemaResult(BaseModel):
+    """Output produced by the Database Architect Agent."""
+    task: str
+    summary_md: str
+    tables: list[DBTable] = Field(default_factory=list)
+    migration_sql: str = ""
+    er_diagram_md: str = ""
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class DevOpsReport(BaseModel):
+    """Output produced by the DevOps Agent."""
+    task: str
+    summary_md: str
+    artifacts: dict[str, str] = Field(default_factory=dict)  # filename → content
+    commands: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class DataAnalyticsReport(BaseModel):
+    """Output produced by the Data Analytics Agent."""
+    task: str
+    summary_md: str
+    insights: list[str] = Field(default_factory=list)
+    chart_specs: list[dict[str, Any]] = Field(default_factory=list)  # vega-lite specs
+    recommendations: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class ProjectTask(BaseModel):
+    """A project management task item."""
+    id: str
+    title: str
+    status: str   # todo / in_progress / done / blocked
+    priority: str # high / medium / low
+    assignee: str = ""
+    due_date: str = ""
+    notes: str = ""
+
+
+class ProjectStatusReport(BaseModel):
+    """Output produced by the Project Manager Agent."""
+    project: str
+    summary_md: str
+    tasks: list[ProjectTask] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
+    progress_pct: int = 0
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class SecurityFinding(BaseModel):
+    """A single security vulnerability finding."""
+    severity: str      # critical / high / medium / low / info
+    cwe_id: str        # e.g. CWE-89
+    owasp: str         # e.g. A03:2021 Injection
+    title: str
+    description: str
+    location: str
+    remediation: str
+
+
+class SecurityAuditReport(BaseModel):
+    """Output produced by the Security Audit Agent."""
+    target: str
+    summary_md: str
+    findings: list[SecurityFinding] = Field(default_factory=list)
+    risk_score: int = 0   # 0-100
+    pass_audit: bool = False
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

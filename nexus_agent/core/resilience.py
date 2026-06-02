@@ -41,6 +41,19 @@ def _retryable(exc: BaseException) -> bool:
     if isinstance(exc, (TransientError, TimeoutError, ConnectionError, OSError)):
         return True
     name = exc.__class__.__name__.lower()
+    msg  = str(exc).lower()
+    # HTTP 429 / quota exceeded — treat as transient so tenacity retries with backoff.
+    # Gemini free tier returns 429 after 15 req/min; the error message contains the
+    # retry delay in seconds.  We mark it retryable so the exponential backoff kicks in.
+    if (
+        "429" in msg
+        or "rate limit" in msg
+        or "quota" in msg
+        or "too many requests" in msg
+        or "generativelanguage" in msg          # Gemini quota string
+        or "resource_exhausted" in msg.replace(" ", "_")
+    ):
+        return True
     return "timeout" in name or "connection" in name
 
 
@@ -75,7 +88,10 @@ def resilient_call(
             (TransientError, TimeoutError, ConnectionError, OSError)
         ),
         stop=stop_after_attempt(max(1, settings.inference_max_retries)),
-        wait=wait_exponential(multiplier=1, min=1, max=10) + wait_random(0, 1),
+        # max=60 ensures the backoff is long enough to clear Gemini's 429
+        # retry window (~35 s).  Previously max=10 meant retries fired too soon
+        # and exhausted the quota even faster.
+        wait=wait_exponential(multiplier=2, min=2, max=60) + wait_random(0, 5),
     )
     def _attempt() -> T:
         try:

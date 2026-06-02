@@ -76,6 +76,28 @@ class Settings(BaseSettings):
     circuit_breaker_threshold: int = Field(default=5, alias="CIRCUIT_BREAKER_THRESHOLD")
     circuit_breaker_reset_seconds: int = Field(default=60, alias="CIRCUIT_BREAKER_RESET_SECONDS")
 
+    # ── Email / SMTP notifications ───────────────────────────────────────────
+    smtp_host: str = Field(default="", alias="SMTP_HOST")
+    smtp_port: int = Field(default=587, alias="SMTP_PORT")
+    smtp_user: str = Field(default="", alias="SMTP_USER")
+    smtp_password: str = Field(default="", alias="SMTP_PASSWORD")
+    smtp_from: str = Field(default="nexus-agent@noreply.local", alias="SMTP_FROM")
+    smtp_use_tls: bool = Field(default=True, alias="SMTP_USE_TLS")
+    notification_email: str = Field(default="", alias="NOTIFICATION_EMAIL")
+
+    # ── LINE Notify ──────────────────────────────────────────────────────────
+    line_notify_token: str = Field(default="", alias="LINE_NOTIFY_TOKEN")
+
+    # ── Scheduler ────────────────────────────────────────────────────────────
+    scheduler_timezone: str = Field(default="Asia/Bangkok", alias="SCHEDULER_TIMEZONE")
+
+    # ── TikTok OAuth ─────────────────────────────────────────────────────────
+    tiktok_client_key: str = Field(default="", alias="TIKTOK_CLIENT_KEY")
+    tiktok_client_secret: str = Field(default="", alias="TIKTOK_CLIENT_SECRET")
+
+    # ── Multi-workspace ──────────────────────────────────────────────────────
+    workspace_isolation: bool = Field(default=False, alias="WORKSPACE_ISOLATION")
+
     # ── Validators ───────────────────────────────────────────────────────
     @field_validator("api_keys", "admin_api_keys", "cors_origins", mode="before")
     @classmethod

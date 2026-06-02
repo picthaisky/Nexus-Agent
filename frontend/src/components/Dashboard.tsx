@@ -1,211 +1,227 @@
 import { useMemo, useState } from "react";
-import { Activity, Cpu, Wifi, WifiOff, LayoutGrid, Box, Sliders, Search, Briefcase, LogOut } from "lucide-react";
+import {
+  Activity, Cpu, Wifi, WifiOff, LayoutGrid, Box, Sliders,
+  Search, Briefcase, LogOut, DollarSign, Tag, MessageSquare,
+  Database, Settings, ChevronDown, ChevronRight,
+} from "lucide-react";
 import { useAgentSocket } from "../hooks/useAgentSocket";
 import { useAuth } from "../auth";
-import { AgentMonitorCell } from "./AgentMonitorCell";
-import { CommandInput } from "./CommandInput";
-import { SystemHealthPanel } from "./SystemHealthPanel";
-import { LiveLogViewer } from "./LiveLogViewer";
-import { IsometricRoom } from "./IsometricRoom";
-import { WorkspacePanel } from "./WorkspacePanel";
-import { AgentspacePanel } from "./AgentspacePanel";
+import { AgentMonitorCell }      from "./AgentMonitorCell";
+import { CommandInput }          from "./CommandInput";
+import { SystemHealthPanel }     from "./SystemHealthPanel";
+import { LiveLogViewer }         from "./LiveLogViewer";
+import { IsometricRoom }         from "./IsometricRoom";
+import { WorkspacePanel }        from "./WorkspacePanel";
+import { AgentspacePanel }       from "./AgentspacePanel";
 import { SpecialistOfficePanel } from "./SpecialistOfficePanel";
-import { ErrorBoundary } from "./ErrorBoundary";
+import { CostDashboard }         from "./CostDashboard";
+import { TaskTemplates }         from "./TaskTemplates";
+import { ChatPanel }             from "./ChatPanel";
+import { KnowledgeBasePanel }    from "./KnowledgeBasePanel";
+import { AdminPanel }            from "./AdminPanel";
+import { ErrorBoundary }         from "./ErrorBoundary";
 
-const ORDER = ["planner", "architect", "developer", "ui_weaver", "validator", "optimizer"];
+type ViewMode =
+  | "isometric" | "grid" | "workspace" | "agentspace"
+  | "specialists" | "costs" | "templates"
+  | "chat" | "knowledge-base" | "admin";
+
+const ORDER = ["planner","architect","developer","ui_weaver","validator","optimizer"];
+
+// ── View definitions ──────────────────────────────────────────────────────────
+const VIEW_GROUPS = [
+  {
+    label: "Office",
+    views: [
+      { id: "isometric" as ViewMode, icon: <Box className="w-3.5 h-3.5" />,         label: "Isometric Office" },
+      { id: "grid"      as ViewMode, icon: <LayoutGrid className="w-3.5 h-3.5" />,  label: "Grid View" },
+      { id: "workspace" as ViewMode, icon: <Sliders className="w-3.5 h-3.5" />,     label: "Workspace Config" },
+      { id: "agentspace"as ViewMode, icon: <Search className="w-3.5 h-3.5" />,      label: "Agentspace" },
+    ],
+  },
+  {
+    label: "Agents",
+    views: [
+      { id: "specialists"   as ViewMode, icon: <Briefcase className="w-3.5 h-3.5" />,     label: "Specialists (11)" },
+      { id: "chat"          as ViewMode, icon: <MessageSquare className="w-3.5 h-3.5" />, label: "Chat" },
+      { id: "knowledge-base"as ViewMode, icon: <Database className="w-3.5 h-3.5" />,      label: "Knowledge Base" },
+    ],
+  },
+  {
+    label: "System",
+    views: [
+      { id: "costs"     as ViewMode, icon: <DollarSign className="w-3.5 h-3.5" />,  label: "Cost Monitor" },
+      { id: "templates" as ViewMode, icon: <Tag className="w-3.5 h-3.5" />,         label: "Templates" },
+      { id: "admin"     as ViewMode, icon: <Settings className="w-3.5 h-3.5" />,    label: "Admin" },
+    ],
+  },
+];
 
 export default function Dashboard() {
   const { setApiKey } = useAuth();
   const { agents, connected, expEffects, logs } = useAgentSocket();
-  const [viewMode, setViewMode] = useState<"grid" | "isometric" | "workspace" | "agentspace" | "specialists">("isometric");
+  const [viewMode, setViewMode] = useState<ViewMode>("isometric");
+  const [navExpanded, setNavExpanded] = useState<Record<string,boolean>>({ Office: true, Agents: true, System: true });
 
-  const cells = useMemo(() => {
-    return ORDER.map((id) => agents[id]).filter(Boolean);
-  }, [agents]);
+  const cells = useMemo(() => ORDER.map(id => agents[id]).filter(Boolean), [agents]);
 
   const fxByAgent = useMemo(() => {
     const map: Record<string, { delta: number }> = {};
-    expEffects.forEach((fx) => (map[fx.agent_id] = { delta: fx.delta }));
+    expEffects.forEach(fx => (map[fx.agent_id] = { delta: fx.delta }));
     return map;
   }, [expEffects]);
 
-  const totalCost = Object.values(agents).reduce(
-    (acc, a) => acc + (a.metrics?.cost_usd || 0),
-    0
-  );
-  const totalExp = Object.values(agents).reduce((acc, a) => acc + (a.exp_points || 0), 0);
+  const totalCost = Object.values(agents).reduce((a, ag) => a + (ag.metrics?.cost_usd || 0), 0);
+  const totalExp  = Object.values(agents).reduce((a, ag) => a + (ag.exp_points || 0), 0);
 
   const handleRunTask = async (goal: string): Promise<{ task_id?: string }> => {
-    const key = (window as unknown as { __NEXUS_API_KEY__?: string | null }).__NEXUS_API_KEY__ || "";
-    const targetUrl = import.meta.env?.VITE_NEXUS_API_URL ? `${import.meta.env.VITE_NEXUS_API_URL}/tasks/run` : "/tasks/run";
-    const res = await fetch(targetUrl, {
+    const key = (window as any).__NEXUS_API_KEY__ || "";
+    const url = import.meta.env?.VITE_NEXUS_API_URL ? `${import.meta.env.VITE_NEXUS_API_URL}/tasks/run` : "/tasks/run";
+    const res = await fetch(url, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Key": key
-      },
-      body: JSON.stringify({ goal })
+      headers: { "Content-Type": "application/json", "X-API-Key": key },
+      body: JSON.stringify({ goal }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error((err as { detail?: string }).detail || `Failed to submit task: ${res.status}`);
+      throw new Error((err as any).detail || `HTTP ${res.status}`);
     }
     return res.json();
   };
 
+  // Full-width views (no sidebar)
+  const isFullWidth = viewMode === "chat" || viewMode === "knowledge-base" || viewMode === "admin";
+
   return (
-    <div className="flex flex-col h-screen overflow-hidden bg-cyber-bg text-slate-300">
-      {/* Top bar */}
-      <header className="flex-none z-10 border-b border-cyber-neon/20 bg-cyber-bg/80 backdrop-blur">
-        <div className="mx-auto flex flex-col md:flex-row max-w-[1600px] items-center justify-between px-4 py-3 gap-3">
-          <div className="flex items-center gap-3">
-            <Activity className="h-5 w-5 md:h-6 md:w-6 text-cyber-gold shrink-0" />
-            <div className="text-center md:text-left">
-              <div className="text-xs md:text-sm uppercase tracking-[0.1em] sm:tracking-[0.2em] md:tracking-[0.3em] text-cyber-neon/80">
-                Cyber-Thai Command Center
-              </div>
-              <div className="text-[10px] md:text-xs text-slate-400">Nexus-Agent · Multi-AI Trading Office</div>
-            </div>
-          </div>
-          
-          <div className="flex flex-wrap justify-center items-center gap-4 md:gap-6 text-[10px] md:text-xs text-slate-300">
-            {/* View Toggle */}
-            <div className="flex border border-cyber-neon/20 rounded-lg p-0.5 bg-cyber-panel/40">
-              <button
-                onClick={() => setViewMode("isometric")}
-                className={`flex items-center gap-1.5 px-3 py-1 text-[10px] md:text-xs rounded-md transition-all font-mono ${
-                  viewMode === "isometric"
-                    ? "bg-cyber-neon/20 text-cyber-neon border border-cyber-neon/40 shadow-[0_0_10px_rgba(95,225,255,0.25)] font-bold"
-                    : "text-slate-400 hover:text-slate-200"
-                }`}
-              >
-                <Box className="w-3.5 h-3.5" />
-                <span>Isometric Office</span>
-              </button>
-              <button
-                onClick={() => setViewMode("grid")}
-                className={`flex items-center gap-1.5 px-3 py-1 text-[10px] md:text-xs rounded-md transition-all font-mono ${
-                  viewMode === "grid"
-                    ? "bg-cyber-neon/20 text-cyber-neon border border-cyber-neon/40 shadow-[0_0_10px_rgba(95,225,255,0.25)] font-bold"
-                    : "text-slate-400 hover:text-slate-200"
-                }`}
-              >
-                <LayoutGrid className="w-3.5 h-3.5" />
-                <span>Grid View</span>
-              </button>
-              <button
-                onClick={() => setViewMode("workspace")}
-                className={`flex items-center gap-1.5 px-3 py-1 text-[10px] md:text-xs rounded-md transition-all font-mono ${
-                  viewMode === "workspace"
-                    ? "bg-cyber-neon/20 text-cyber-neon border border-cyber-neon/40 shadow-[0_0_10px_rgba(95,225,255,0.25)] font-bold"
-                    : "text-slate-400 hover:text-slate-200"
-                }`}
-              >
-                <Sliders className="w-3.5 h-3.5" />
-                <span>Workspace Config</span>
-              </button>
-              <button
-                onClick={() => setViewMode("agentspace")}
-                className={`flex items-center gap-1.5 px-3 py-1 text-[10px] md:text-xs rounded-md transition-all font-mono ${
-                  viewMode === "agentspace"
-                    ? "bg-cyber-neon/20 text-cyber-neon border border-cyber-neon/40 shadow-[0_0_10px_rgba(95,225,255,0.25)] font-bold"
-                    : "text-slate-400 hover:text-slate-200"
-                }`}
-              >
-                <Search className="w-3.5 h-3.5" />
-                <span>Agentspace</span>
-              </button>
-              <button
-                onClick={() => setViewMode("specialists")}
-                className={`flex items-center gap-1.5 px-3 py-1 text-[10px] md:text-xs rounded-md transition-all font-mono ${
-                  viewMode === "specialists"
-                    ? "bg-cyber-neon/20 text-cyber-neon border border-cyber-neon/40 shadow-[0_0_10px_rgba(95,225,255,0.25)] font-bold"
-                    : "text-slate-400 hover:text-slate-200"
-                }`}
-              >
-                <Briefcase className="w-3.5 h-3.5" />
-                <span>Specialists Office</span>
-              </button>
-            </div>
+    <div className="flex h-screen overflow-hidden bg-cyber-bg text-slate-300">
 
-            <div className="flex items-center gap-1">
-              <Cpu className="h-3 w-3 md:h-4 md:w-4 text-status-processing shrink-0" />
-              <span className="font-mono">{cells.length} agents</span>
-            </div>
-            <div className="font-mono">EXP {totalExp}</div>
-            <div className="font-mono">${totalCost.toFixed(4)}</div>
-            <div
-              className={`flex items-center gap-1 ${
-                connected ? "text-status-success" : "text-status-error"
-              }`}
-            >
-              {connected ? <Wifi className="h-3 w-3 md:h-4 md:w-4 shrink-0" /> : <WifiOff className="h-3 w-3 md:h-4 md:w-4 shrink-0" />}
-              <span>{connected ? "LIVE" : "OFFLINE"}</span>
-            </div>
-
-            {/* Logout */}
-            <button
-              type="button"
-              onClick={() => { if (confirm("ออกจากระบบ?")) setApiKey(null); }}
-              title="Logout"
-              className="p-1.5 rounded-md border border-slate-700 text-slate-500 hover:text-status-error hover:border-status-error/40 transition-colors"
-            >
-              <LogOut className="h-3.5 w-3.5" />
-            </button>
+      {/* ── Left Nav (collapsible sidebar) ─────────────────────────────── */}
+      <nav className="flex-none w-48 flex flex-col border-r border-cyber-neon/20 bg-cyber-bg/90 overflow-y-auto">
+        {/* Logo */}
+        <div className="flex items-center gap-2 px-3 py-4 border-b border-cyber-neon/15">
+          <Activity className="h-5 w-5 text-cyber-gold shrink-0" />
+          <div className="min-w-0">
+            <div className="text-[9px] uppercase tracking-[0.2em] text-cyber-neon/80 truncate">Cyber-Thai CC</div>
+            <div className="text-[8px] text-slate-500 truncate">Nexus-Agent</div>
           </div>
         </div>
-      </header>
 
-      {/* Main Content Area */}
-      <main className="flex-1 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden mx-auto w-full max-w-[1600px] px-4 py-4 lg:px-6 lg:py-6 gap-6">
-        {/* Left Sidebar: Health */}
-        <aside className="w-full lg:w-64 flex-none order-2 lg:order-1">
-          <SystemHealthPanel />
-        </aside>
-
-        {/* Center Section: Agents/Isometric/Workspace */}
-        <section className="flex-1 overflow-visible min-w-0 pr-0 lg:pr-2 order-1 lg:order-2">
-          {viewMode === "isometric" ? (
-            <ErrorBoundary>
-              <IsometricRoom agents={agents} expEffects={expEffects} />
-            </ErrorBoundary>
-          ) : cells.length === 0 ? (
-            <div className="rounded-2xl border border-cyber-neon/20 bg-cyber-panel/50 p-6 md:p-12 text-center text-slate-400 text-sm md:text-base">
-              Waiting for agent telemetry…
+        {/* View groups */}
+        <div className="flex-1 py-2">
+          {VIEW_GROUPS.map(group => (
+            <div key={group.label} className="mb-1">
+              <button type="button"
+                onClick={() => setNavExpanded(e => ({ ...e, [group.label]: !e[group.label] }))}
+                className="w-full flex items-center justify-between px-3 py-1.5 text-[9px] uppercase font-mono text-slate-500 hover:text-slate-400 tracking-widest">
+                {group.label}
+                {navExpanded[group.label] ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+              </button>
+              {navExpanded[group.label] && group.views.map(v => (
+                <button key={v.id} type="button"
+                  onClick={() => setViewMode(v.id)}
+                  className={`w-full flex items-center gap-2 px-3 py-2 text-[11px] font-mono transition-all ${
+                    viewMode === v.id
+                      ? "bg-cyber-neon/15 text-cyber-neon border-r-2 border-cyber-neon font-bold"
+                      : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/40"
+                  }`}
+                >
+                  <span className={viewMode === v.id ? "text-cyber-neon" : "text-slate-600"}>{v.icon}</span>
+                  {v.label}
+                </button>
+              ))}
             </div>
-          ) : viewMode === "grid" ? (
-            <ErrorBoundary>
-              <div className="grid grid-cols-1 gap-4 md:gap-6 sm:grid-cols-2 xl:grid-cols-3">
-                {cells.map((a) => (
-                  <AgentMonitorCell key={a.agent_id} agent={a} expFx={fxByAgent[a.agent_id]} />
-                ))}
-              </div>
-            </ErrorBoundary>
-          ) : viewMode === "workspace" ? (
-            <ErrorBoundary>
-              <WorkspacePanel agents={agents} />
-            </ErrorBoundary>
-          ) : viewMode === "agentspace" ? (
-            <ErrorBoundary>
-              <AgentspacePanel />
-            </ErrorBoundary>
-          ) : (
-            <ErrorBoundary>
-              <SpecialistOfficePanel />
-            </ErrorBoundary>
-          )}
-        </section>
+          ))}
+        </div>
 
-        {/* Right Sidebar: Logs */}
-        <aside className="w-full h-80 lg:h-auto lg:w-80 flex-none order-3 lg:order-3">
-          <LiveLogViewer logs={logs} />
-        </aside>
-      </main>
+        {/* Stats & Logout */}
+        <div className="border-t border-cyber-neon/15 p-3 space-y-1.5">
+          <div className="flex items-center gap-1.5 text-[9px] font-mono text-slate-500">
+            <Cpu className="w-3 h-3 text-status-processing" />
+            {cells.length} agents
+          </div>
+          <div className="text-[9px] font-mono text-slate-500">EXP {totalExp} · ${totalCost.toFixed(4)}</div>
+          <div className={`flex items-center gap-1 text-[9px] font-mono ${connected ? "text-status-success" : "text-status-error"}`}>
+            {connected ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
+            {connected ? "LIVE" : "OFFLINE"}
+          </div>
+          <button type="button" title="Logout"
+            onClick={() => { if (confirm("ออกจากระบบ?")) setApiKey(null); }}
+            className="flex items-center gap-1.5 text-[9px] font-mono text-slate-500 hover:text-status-error transition-colors mt-1">
+            <LogOut className="w-3.5 h-3.5" /> Logout
+          </button>
+        </div>
+      </nav>
 
-      {/* Bottom Command Input */}
-      <footer className="flex-none">
-        <CommandInput onRunTask={handleRunTask} disabled={!connected} />
-      </footer>
+      {/* ── Main content ─────────────────────────────────────────────────── */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+
+        {/* Full-width views */}
+        {isFullWidth && (
+          <div className="flex-1 overflow-hidden p-4">
+            <ErrorBoundary>
+              {viewMode === "chat"          && <ChatPanel />}
+              {viewMode === "knowledge-base"&& <KnowledgeBasePanel />}
+              {viewMode === "admin"         && <AdminPanel />}
+            </ErrorBoundary>
+          </div>
+        )}
+
+        {/* Standard 3-column layout */}
+        {!isFullWidth && (
+          <main className="flex-1 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden px-4 py-4 lg:px-5 lg:py-5 gap-5">
+            {/* Left sidebar */}
+            <aside className="w-full lg:w-60 flex-none order-2 lg:order-1">
+              <SystemHealthPanel />
+            </aside>
+
+            {/* Center */}
+            <section className="flex-1 overflow-visible min-w-0 order-1 lg:order-2">
+              {viewMode === "isometric" ? (
+                <ErrorBoundary>
+                  <IsometricRoom agents={agents} expEffects={expEffects} />
+                </ErrorBoundary>
+              ) : viewMode === "grid" ? (
+                <ErrorBoundary>
+                  {cells.length === 0 ? (
+                    <div className="rounded-2xl border border-cyber-neon/20 bg-cyber-panel/50 p-12 text-center text-slate-400 text-sm">
+                      Waiting for agent telemetry… <br />
+                      <span className="text-[10px] text-slate-600">Connect to the backend WebSocket to see live agent data.</span>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                      {cells.map(a => (
+                        <AgentMonitorCell key={a.agent_id} agent={a} expFx={fxByAgent[a.agent_id]} />
+                      ))}
+                    </div>
+                  )}
+                </ErrorBoundary>
+              ) : viewMode === "workspace" ? (
+                <ErrorBoundary><WorkspacePanel agents={agents} /></ErrorBoundary>
+              ) : viewMode === "agentspace" ? (
+                <ErrorBoundary><AgentspacePanel /></ErrorBoundary>
+              ) : viewMode === "specialists" ? (
+                <ErrorBoundary><SpecialistOfficePanel /></ErrorBoundary>
+              ) : viewMode === "costs" ? (
+                <ErrorBoundary><CostDashboard /></ErrorBoundary>
+              ) : (
+                <ErrorBoundary><TaskTemplates onRunTask={handleRunTask} /></ErrorBoundary>
+              )}
+            </section>
+
+            {/* Right sidebar */}
+            <aside className="w-full h-72 lg:h-auto lg:w-72 flex-none order-3">
+              <LiveLogViewer logs={logs} />
+            </aside>
+          </main>
+        )}
+
+        {/* Command Input (all non-full views) */}
+        {!isFullWidth && (
+          <footer className="flex-none border-t border-cyber-neon/15">
+            <CommandInput onRunTask={handleRunTask} disabled={!connected} />
+          </footer>
+        )}
+      </div>
     </div>
   );
 }
