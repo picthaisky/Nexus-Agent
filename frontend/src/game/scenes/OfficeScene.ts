@@ -183,9 +183,19 @@ export class OfficeScene extends Scene {
         this.cameras.main.scrollX = sp.x - this.cameras.main.width  / 2;
         this.cameras.main.scrollY = sp.y - this.cameras.main.height / 2;
         EventBus.emit('current-scene-ready', this);
+
+        // Clean up EventBus listeners when this scene is shut down or destroyed
+        // to prevent stale handlers firing on a dead scene instance.
+        this.events.once(Phaser.Core.Events.DESTROY, () => this._cleanupEventBus());
+        this.events.once('shutdown',                  () => this._cleanupEventBus());
     }
 
     update(_t: number, dt: number) {
+        // Guard: skip all frame logic while the scene is not fully active.
+        // Phaser can call update() during shutdown, which causes null-access crashes
+        // on Graphics/Container objects that are mid-way through destruction.
+        if (!this.scene?.isActive() || !this.cameras?.main || !this.playerGfx?.active) return;
+
         this.movePlayer(dt);
         this.trackCamera();
         this.checkProximity();
@@ -1072,12 +1082,19 @@ export class OfficeScene extends Scene {
 
     // ── Avatar (corporate suit) ──────────────────────────────────────────────
 
+    /** States that indicate the agent is working at their desk (triggers sitting pose). */
+    private static readonly DESK_STATES: ReadonlySet<MicroState> = new Set([
+        'coding', 'executing', 'optimizing', 'testing',
+        'designing', 'thinking', 'planning',
+    ]);
+
     private drawAvatar(
         gfx: Phaser.GameObjects.Graphics,
         accent: number,
         state: MicroState,
         t: number,
         isPlayer = false,
+        sitting  = false,    // true = draw seated-at-desk pose
     ) {
         gfx.clear();
         const s = t / 1000;
@@ -1086,77 +1103,177 @@ export class OfficeScene extends Scene {
         switch (state) {
             case 'idle':             bob = Math.sin(s * 0.9) * 1.2; break;
             case 'thinking': case 'planning': case 'designing':
-                bob = Math.sin(s * 0.7) * 0.8; aRdx = -6 + Math.sin(s * 1.8) * 1.5; break;
+                bob = Math.sin(s * 0.7) * 0.8;
+                aRdx = sitting ? 0 : (-6 + Math.sin(s * 1.8) * 1.5);
+                break;
             case 'coding': case 'executing': case 'optimizing': case 'testing':
                 bob = Math.sin(s * 3.5) * 0.6;
-                aRdx = Math.sin(s * 5.5) * 3.5; aLdx = Math.cos(s * 5.5) * 3.5; break;
+                if (!sitting) { aRdx = Math.sin(s * 5.5) * 3.5; aLdx = Math.cos(s * 5.5) * 3.5; }
+                break;
             case 'walking':
                 bob = Math.abs(Math.sin(s * 3.5)) * -1.5;
-                lLdy = Math.sin(s * 4.5) * 4.5; lRdy = -Math.sin(s * 4.5) * 4.5; break;
+                lLdy = Math.sin(s * 4.5) * 4.5; lRdy = -Math.sin(s * 4.5) * 4.5;
+                break;
             case 'waiting_for_human': bob = Math.sin(s * 0.4) * 1.5; break;
             case 'completed':  bob = Math.sin(s * 6) * 1.8; break;
             case 'error':      bob = (Math.floor(s * 4) % 2 === 0) ? -0.8 : 0.8; break;
         }
 
         const b = bob;
+        const isTyping = sitting && (state === 'coding' || state === 'executing' || state === 'optimizing');
         const isActive = state !== 'idle';
 
-        // Ground shadow
-        gfx.fillStyle(0x000000, 0.10); gfx.fillEllipse(0, 5, 16, 5);
+        // ── SITTING POSE ──────────────────────────────────────────────────────
+        if (sitting) {
+            // ─ Chair backrest (behind character, drawn first) ─
+            gfx.fillStyle(P.CHAIR_BACK, 1);
+            gfx.fillRect(-9, -50 + b, 18, 22);
+            gfx.lineStyle(0.5, 0x111111, 0.35);
+            gfx.strokeRect(-9, -50 + b, 18, 22);
+            // Headrest
+            gfx.fillStyle(P.CHAIR_CUSHION, 1);
+            gfx.fillRect(-6, -54 + b, 12, 6);
+            gfx.fillStyle(0xffffff, 0.07);
+            gfx.fillRect(-4, -53 + b, 4, 2);
 
-        // Trousers
-        gfx.fillStyle(P.SUIT, 1);
-        gfx.fillRect(-5, -18 + lLdy + b, 4, 13);
-        gfx.fillRect( 1, -18 + lRdy + b, 4, 13);
+            // ─ Armrests (flanking the body) ─
+            gfx.fillStyle(P.CHAIR_BASE, 1);
+            gfx.fillRect(-16, -34 + b, 6, 6);
+            gfx.fillRect( 10, -34 + b, 6, 6);
 
-        // Shoes
-        gfx.fillStyle(0x111827, 1);
-        gfx.fillRect(-6, -6 + lLdy + b, 5, 3);
-        gfx.fillRect( 1, -6 + lRdy + b, 5, 3);
+            // ─ Chair seat (visible below body) ─
+            gfx.fillStyle(P.CHAIR_SEAT, 0.9);
+            gfx.beginPath();
+            gfx.moveTo(  0, -26 + b - 8);
+            gfx.lineTo( 13, -26 + b);
+            gfx.lineTo(  0, -26 + b + 8);
+            gfx.lineTo(-13, -26 + b);
+            gfx.closePath(); gfx.fillPath();
+            gfx.lineStyle(0.5, P.CHAIR_BASE, 0.5); gfx.strokePath();
 
-        // Jacket body
-        const suitCol = state === 'error' ? (Math.floor(s * 4) % 2 === 0 ? P.ALERT : P.SUIT) : P.SUIT;
-        gfx.fillStyle(suitCol, 1); gfx.fillRect(-7, -40 + b, 14, 22);
+            // ─ Ground shadow (small — feet tucked under) ─
+            gfx.fillStyle(0x000000, 0.07); gfx.fillEllipse(0, 6, 10, 4);
 
-        // White shirt centre
-        gfx.fillStyle(P.SHIRT, 1); gfx.fillRect(-2, -40 + b, 4, 18);
+            // ─ Thighs (horizontal, extending outward from hips) ─
+            gfx.fillStyle(P.SUIT, 1);
+            gfx.fillRect(-10, -24 + b, 7, 4);  // left thigh
+            gfx.fillRect(  3, -24 + b, 7, 4);  // right thigh
 
-        // Lapels
-        gfx.fillStyle(P.SUIT, 1);
-        const lapelL: [number,number][] = [[-2,-40+b],[-7,-36+b],[-7,-20+b],[-2,-22+b]];
-        gfx.beginPath(); lapelL.forEach(([x,y], i) => i===0 ? gfx.moveTo(x,y) : gfx.lineTo(x,y));
-        gfx.closePath(); gfx.fillPath();
+            // ─ Shins (vertical, dropping from knees) ─
+            gfx.fillRect(-10, -20 + b, 4, 13); // left shin
+            gfx.fillRect(  6, -20 + b, 4, 13); // right shin
 
-        const lapelR: [number,number][] = [[2,-40+b],[7,-36+b],[7,-20+b],[2,-22+b]];
-        gfx.beginPath(); lapelR.forEach(([x,y], i) => i===0 ? gfx.moveTo(x,y) : gfx.lineTo(x,y));
-        gfx.closePath(); gfx.fillPath();
+            // ─ Shoes ─
+            gfx.fillStyle(0x111827, 1);
+            gfx.fillRect(-11, -7 + b, 5, 3);
+            gfx.fillRect(  6, -7 + b, 5, 3);
 
-        // Tie (role color)
-        gfx.fillStyle(accent, 0.9);
-        gfx.beginPath();
-        gfx.moveTo(0, -40+b); gfx.lineTo(-2, -34+b); gfx.lineTo(0, -22+b); gfx.lineTo(2, -34+b);
-        gfx.closePath(); gfx.fillPath();
+            // ─ Body (same as standing) ─
+            const suitCol = state === 'error' ? (Math.floor(s * 4) % 2 === 0 ? P.ALERT : P.SUIT) : P.SUIT;
+            gfx.fillStyle(suitCol, 1); gfx.fillRect(-7, -40 + b, 14, 16);
+            gfx.fillStyle(P.SHIRT, 1); gfx.fillRect(-2, -40 + b, 4, 14);
 
-        // Activity lapel pin
-        if (isActive) {
-            gfx.fillStyle(this.stateAccent(state), 0.9);
-            gfx.fillCircle(-4, -36 + b, 2);
+            // Lapels
+            gfx.fillStyle(P.SUIT, 1);
+            const lL: [number,number][] = [[-2,-40+b],[-7,-36+b],[-7,-26+b],[-2,-28+b]];
+            gfx.beginPath(); lL.forEach(([x,y], i) => i===0 ? gfx.moveTo(x,y) : gfx.lineTo(x,y));
+            gfx.closePath(); gfx.fillPath();
+            const lR: [number,number][] = [[2,-40+b],[7,-36+b],[7,-26+b],[2,-28+b]];
+            gfx.beginPath(); lR.forEach(([x,y], i) => i===0 ? gfx.moveTo(x,y) : gfx.lineTo(x,y));
+            gfx.closePath(); gfx.fillPath();
+
+            // Tie
+            gfx.fillStyle(accent, 0.9);
+            gfx.beginPath();
+            gfx.moveTo(0,-40+b); gfx.lineTo(-2,-35+b); gfx.lineTo(0,-27+b); gfx.lineTo(2,-35+b);
+            gfx.closePath(); gfx.fillPath();
+
+            // Activity pin
+            if (isActive) { gfx.fillStyle(this.stateAccent(state), 0.9); gfx.fillCircle(-4, -36 + b, 2); }
+
+            // ─ Arms — typing pose when coding, relaxed otherwise ─
+            if (isTyping) {
+                const tap = Math.sin(s * 7) * 2;  // keyboard tap animation
+                gfx.fillStyle(P.SUIT, 0.95);
+                gfx.fillRect(-14, -36 + b, 12, 4); // left forearm horizontal
+                gfx.fillRect(  2, -36 + b, 12, 4); // right forearm horizontal
+                gfx.fillStyle(P.SHIRT, 0.8);
+                gfx.fillRect(-14, -36 + b, 3, 3);  // left cuff
+                gfx.fillRect( 11, -36 + b, 3, 3);  // right cuff
+                gfx.fillStyle(P.SKIN, 1);
+                gfx.fillEllipse(-8, -32 + tap + b, 5, 4);  // left hand (typing)
+                gfx.fillEllipse( 8, -32 - tap + b, 5, 4);  // right hand
+            } else {
+                // Arms resting on armrests
+                gfx.fillStyle(P.SUIT, 0.95);
+                gfx.fillRect(-12, -38 + b, 5, 8);
+                gfx.fillRect(  7, -38 + b, 5, 8);
+                gfx.fillStyle(P.SHIRT, 0.8);
+                gfx.fillRect(-12, -31 + b, 5, 3);
+                gfx.fillRect(  7, -31 + b, 5, 3);
+                gfx.fillStyle(P.SKIN, 1);
+                gfx.fillEllipse(-9, -27 + b, 5, 5);
+                gfx.fillEllipse(10, -27 + b, 5, 5);
+            }
+
+        } else {
+            // ── STANDING POSE (original) ─────────────────────────────────────
+
+            // Ground shadow
+            gfx.fillStyle(0x000000, 0.10); gfx.fillEllipse(0, 5, 16, 5);
+
+            // Trousers
+            gfx.fillStyle(P.SUIT, 1);
+            gfx.fillRect(-5, -18 + lLdy + b, 4, 13);
+            gfx.fillRect( 1, -18 + lRdy + b, 4, 13);
+
+            // Shoes
+            gfx.fillStyle(0x111827, 1);
+            gfx.fillRect(-6, -6 + lLdy + b, 5, 3);
+            gfx.fillRect( 1, -6 + lRdy + b, 5, 3);
+
+            // Jacket body
+            const suitCol = state === 'error' ? (Math.floor(s * 4) % 2 === 0 ? P.ALERT : P.SUIT) : P.SUIT;
+            gfx.fillStyle(suitCol, 1); gfx.fillRect(-7, -40 + b, 14, 22);
+
+            // White shirt centre
+            gfx.fillStyle(P.SHIRT, 1); gfx.fillRect(-2, -40 + b, 4, 18);
+
+            // Lapels
+            gfx.fillStyle(P.SUIT, 1);
+            const lapelL: [number,number][] = [[-2,-40+b],[-7,-36+b],[-7,-20+b],[-2,-22+b]];
+            gfx.beginPath(); lapelL.forEach(([x,y], i) => i===0 ? gfx.moveTo(x,y) : gfx.lineTo(x,y));
+            gfx.closePath(); gfx.fillPath();
+            const lapelR: [number,number][] = [[2,-40+b],[7,-36+b],[7,-20+b],[2,-22+b]];
+            gfx.beginPath(); lapelR.forEach(([x,y], i) => i===0 ? gfx.moveTo(x,y) : gfx.lineTo(x,y));
+            gfx.closePath(); gfx.fillPath();
+
+            // Tie
+            gfx.fillStyle(accent, 0.9);
+            gfx.beginPath();
+            gfx.moveTo(0, -40+b); gfx.lineTo(-2, -34+b); gfx.lineTo(0, -22+b); gfx.lineTo(2, -34+b);
+            gfx.closePath(); gfx.fillPath();
+
+            // Activity lapel pin
+            if (isActive) { gfx.fillStyle(this.stateAccent(state), 0.9); gfx.fillCircle(-4, -36 + b, 2); }
+
+            // Arms
+            gfx.fillStyle(P.SUIT, 0.95);
+            gfx.fillRect(-12, -38 + aLdx + b, 5, 13);
+            gfx.fillRect( 7,  -38 + aRdx + b, 5, 13);
+
+            // Shirt cuffs
+            gfx.fillStyle(P.SHIRT, 0.8);
+            gfx.fillRect(-12, -27 + aLdx + b, 5, 3);
+            gfx.fillRect( 7,  -27 + aRdx + b, 5, 3);
+
+            // Hands
+            gfx.fillStyle(P.SKIN, 1);
+            gfx.fillEllipse(-9, -23 + aLdx + b, 5, 5);
+            gfx.fillEllipse(10, -23 + aRdx + b, 5, 5);
         }
 
-        // Arms
-        gfx.fillStyle(P.SUIT, 0.95);
-        gfx.fillRect(-12, -38 + aLdx + b, 5, 13);
-        gfx.fillRect( 7,  -38 + aRdx + b, 5, 13);
-
-        // Shirt cuffs
-        gfx.fillStyle(P.SHIRT, 0.8);
-        gfx.fillRect(-12, -27 + aLdx + b, 5, 3);
-        gfx.fillRect( 7,  -27 + aRdx + b, 5, 3);
-
-        // Hands
-        gfx.fillStyle(P.SKIN, 1);
-        gfx.fillEllipse(-9, -23 + aLdx + b, 5, 5);
-        gfx.fillEllipse(10, -23 + aRdx + b, 5, 5);
+        // ── Head (same for both poses) ────────────────────────────────────────
 
         // Neck
         gfx.fillStyle(P.SKIN, 1); gfx.fillRect(-3, -44 + b, 6, 5);
@@ -1287,11 +1404,28 @@ export class OfficeScene extends Scene {
         this.game.canvas.style.cursor = 'grab';
     }
 
+    // Store bound handler refs so they can be removed precisely on cleanup
+    private _onUpdateAgents = (agents: Record<string, AgentRuntimeState>) => {
+        if (!this.scene?.isActive('OfficeScene')) return;   // guard: scene already destroyed
+        this.agentStates = agents;
+        this.syncAgents(agents);
+    };
+    private _onExpEffects = (fx: ExpFx[]) => {
+        if (!this.scene?.isActive('OfficeScene')) return;
+        this.spawnExpFx(fx);
+    };
+
     private setupEvents() {
-        EventBus.on('update-agents', (agents: Record<string, AgentRuntimeState>) => {
-            this.agentStates = agents; this.syncAgents(agents);
-        });
-        EventBus.on('exp-effects', (fx: ExpFx[]) => this.spawnExpFx(fx));
+        EventBus.on('update-agents', this._onUpdateAgents);
+        EventBus.on('exp-effects',   this._onExpEffects);
+    }
+
+    /** Remove all EventBus listeners owned by this scene instance. */
+    private _cleanupEventBus() {
+        EventBus.removeListener('update-agents', this._onUpdateAgents);
+        EventBus.removeListener('exp-effects',   this._onExpEffects);
+        // Reset drag cursor if canvas still exists
+        try { if (this.game?.canvas) this.game.canvas.style.cursor = 'default'; } catch { /* ignore */ }
     }
 
     // ── Update ───────────────────────────────────────────────────────────────
@@ -1398,23 +1532,40 @@ export class OfficeScene extends Scene {
 
     private animateAvatars() {
         const t = this.time.now;
-        this.drawAvatar(this.playerGfx, ROLE_ACCENT.player, 'idle', t, true);
+        // Player never sits (keyboard-controlled, always standing)
+        this.drawAvatar(this.playerGfx, ROLE_ACCENT.player, 'idle', t, true, false);
+
         for (const [id, d] of this.agentSprites) {
             const agent = this.agentStates[id];
             const acc   = ROLE_ACCENT[id] ?? ROLE_ACCENT[agent?.role ?? ''] ?? 0x64748b;
-            this.drawAvatar(d.body, acc, agent?.current_micro_state ?? 'idle', t, false);
+            const state = agent?.current_micro_state ?? 'idle';
+
+            // Sitting = agent is in a desk-work state AND within 1.5 tiles of their home desk
+            const desk    = AGENT_DESKS[id];
+            const atDesk  = desk
+                ? Math.abs(d.cartPos.x - desk.cartX) < 1.5 && Math.abs(d.cartPos.y - desk.cartY) < 1.5
+                : false;
+            const sitting = atDesk && OfficeScene.DESK_STATES.has(state);
+
+            this.drawAvatar(d.body, acc, state, t, false, sitting);
         }
     }
 
     private depthSort() {
+        if (!this.playerCont?.active) return;
         const p = this.c2i(this.playerCart.x, this.playerCart.y);
         this.playerCont.setDepth(p.y + 1);
-        for (const d of this.agentSprites.values()) d.container.setDepth(d.container.y);
+        for (const d of this.agentSprites.values()) {
+            if (d.container?.active) d.container.setDepth(d.container.y);
+        }
     }
 
     // ── Agent sync ───────────────────────────────────────────────────────────
 
     private syncAgents(agents: Record<string, AgentRuntimeState>) {
+        // Guard: bail if this.add is not available (scene not fully initialised or destroyed)
+        if (!this.add) return;
+
         const ids = new Set(Object.keys(agents));
         for (const [id, d] of this.agentSprites) {
             if (!ids.has(id)) { d.container.destroy(); this.agentSprites.delete(id); }
@@ -1482,6 +1633,10 @@ export class OfficeScene extends Scene {
             if (show) {
                 sd.bubble?.destroy(); sd.bubble = undefined;
                 sd.lastMsg = msg!;
+
+                // Guard: container may have been destroyed if the scene is shutting down
+                if (!sd.container?.active || !this.add) { idx++; continue; }
+
                 const truncated = msg!.length > 72 ? msg!.slice(0, 69) + '…' : msg!;
                 const sa = this.stateAccent(agent.current_micro_state);
                 const isErr = agent.current_micro_state === 'error';
@@ -1518,8 +1673,9 @@ export class OfficeScene extends Scene {
     // ── EXP effects ──────────────────────────────────────────────────────────
 
     private spawnExpFx(effects: ExpFx[]) {
+        if (!this.add) return;
         for (const fx of effects) {
-            const d = this.agentSprites.get(fx.agent_id); if (!d) continue;
+            const d = this.agentSprites.get(fx.agent_id); if (!d || !d.container?.active) continue;
             const t = this.add.text(d.container.x, d.container.y - 55, `+${fx.delta} pts`, {
                 fontFamily: 'Inter, system-ui, sans-serif', fontSize: '12px',
                 fontStyle: 'bold', color: '#d97706',
