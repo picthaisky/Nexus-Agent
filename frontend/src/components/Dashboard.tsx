@@ -26,7 +26,16 @@ type ViewMode =
   | "specialists" | "costs" | "templates"
   | "chat" | "knowledge-base" | "admin";
 
-const ORDER = ["planner","architect","developer","ui_weaver","validator","optimizer"];
+// All 16 registered agent IDs — matches DEFAULT_ROSTER in dashboard_hub.py.
+// Core agents first, then specialist agents in alphabetical groups.
+const ORDER = [
+  // Core orchestration agents
+  "planner", "architect", "developer", "ui_weaver", "validator", "optimizer",
+  // Specialist agents
+  "code_reviewer", "debugger", "qa_tester", "db_architect",
+  "devops", "data_analyst", "project_mgr", "security",
+  "rag_agent", "api_integration",
+];
 
 // ── View definitions ──────────────────────────────────────────────────────────
 const VIEW_GROUPS = [

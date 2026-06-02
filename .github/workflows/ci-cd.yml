@@ -19,6 +19,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+    # dependabot PRs are excluded via per-job conditions below
   workflow_dispatch:
     inputs:
       deploy_environment:
@@ -51,6 +52,7 @@ jobs:
   prepare:
     name: 🧭 Prepare
     runs-on: ubuntu-latest
+    if: github.actor != 'dependabot[bot]'
     outputs:
       backend_image: ${{ steps.names.outputs.backend }}
       frontend_image: ${{ steps.names.outputs.frontend }}
@@ -68,6 +70,7 @@ jobs:
   test-backend:
     name: 🧪 Backend · Lint & Test
     runs-on: ubuntu-latest
+    if: github.actor != 'dependabot[bot]'
     steps:
       - name: 📥 Checkout code
         uses: actions/checkout@v4
@@ -116,6 +119,7 @@ jobs:
   test-frontend:
     name: 🎨 Frontend · Build
     runs-on: ubuntu-latest
+    if: github.actor != 'dependabot[bot]'
     defaults:
       run:
         working-directory: frontend
@@ -151,7 +155,9 @@ jobs:
     name: 🐳 Build & Push · Backend
     runs-on: ubuntu-latest
     needs: [prepare, test-backend]
-    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
+    if: |
+      github.actor != 'dependabot[bot]' &&
+      ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch')
     outputs:
       image_tag: ${{ steps.meta.outputs.version }}
       image_digest: ${{ steps.build-push.outputs.digest }}
@@ -212,7 +218,9 @@ jobs:
     name: 🐳 Build & Push · Frontend
     runs-on: ubuntu-latest
     needs: [prepare, test-frontend]
-    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
+    if: |
+      github.actor != 'dependabot[bot]' &&
+      ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch')
     outputs:
       image_tag: ${{ steps.meta.outputs.version }}
       image_digest: ${{ steps.build-push.outputs.digest }}
@@ -273,7 +281,9 @@ jobs:
     name: 🚀 Deploy to Portainer
     runs-on: ubuntu-latest
     needs: [build-backend, build-frontend]
-    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
+    if: |
+      github.actor != 'dependabot[bot]' &&
+      ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch')
     environment:
       name: ${{ github.event.inputs.deploy_environment || 'production' }}
       url: ${{ vars.PORTAINER_URL || 'https://portainer.example.com' }}
@@ -353,7 +363,7 @@ jobs:
     name: 📢 Notify on failure
     runs-on: ubuntu-latest
     needs: [test-backend, test-frontend, build-backend, build-frontend, deploy]
-    if: failure()
+    if: failure() && github.actor != 'dependabot[bot]'
     steps:
       - name: ❌ Pipeline failure summary
         run: |
