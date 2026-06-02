@@ -226,7 +226,7 @@ export function IsometricRoom({ agents, expEffects }: IsometricRoomProps) {
       {/* Controls hint */}
       <div className="absolute z-10 pointer-events-none select-none bottom-3 left-4">
         <div className="flex items-center gap-2 bg-white/80 border border-slate-200 rounded px-2.5 py-1 shadow-sm">
-          {([ ["WASD", "Move"], ["E", "Profile"], ["Scroll", "Zoom"] ] as const).map(([key, desc]) => (
+          {([ ["WASD", "Move"], ["Drag", "Pan"], ["E", "Profile"], ["Scroll", "Zoom"] ] as const).map(([key, desc]) => (
             <span key={key} className="flex items-center gap-1 text-[8px] text-slate-400">
               <kbd className="px-1 py-0.5 rounded border border-slate-300 bg-slate-50 text-slate-500 font-mono text-[7px]">{key}</kbd>
               <span>{desc}</span>

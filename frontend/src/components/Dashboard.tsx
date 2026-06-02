@@ -183,8 +183,14 @@ export default function Dashboard() {
               <SystemHealthPanel />
             </aside>
 
-            {/* Center */}
-            <section className="flex-1 overflow-visible min-w-0 order-1 lg:order-2">
+            {/* Center — scrollable for all views except isometric (which needs overflow-visible) */}
+            <section
+              className={`flex-1 min-w-0 order-1 lg:order-2 ${
+                viewMode === "isometric"
+                  ? "overflow-visible"
+                  : "overflow-y-auto pr-1"
+              }`}
+            >
               {viewMode === "isometric" ? (
                 <ErrorBoundary>
                   <IsometricRoom agents={agents} expEffects={expEffects} />
@@ -197,7 +203,7 @@ export default function Dashboard() {
                       <span className="text-[10px] text-slate-600">Connect to the backend WebSocket to see live agent data.</span>
                     </div>
                   ) : (
-                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 pb-4">
                       {cells.map(a => (
                         <AgentMonitorCell key={a.agent_id} agent={a} expFx={fxByAgent[a.agent_id]} />
                       ))}
