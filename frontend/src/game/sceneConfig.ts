@@ -4,15 +4,19 @@
  */
 
 export const visualStyle = `
-Highly detailed 3D isometric corporate diorama, premium technical visualization,
-clean white studio background, realistic scale, global illumination, soft shadows,
-subtle ambient occlusion, high-end consulting slide illustration.
+Ultra high quality 3D isometric office map diorama, orthographic camera,
+premium architectural visualization, realistic miniature office materials,
+clean white studio background, global illumination, soft shadows, subtle ambient occlusion,
+crisp labels, high-end consulting slide illustration, 1792x1024 composition.
 `.trim();
 
 export const sceneObjects = `
-Realistic corporate office and industrial objects: desks, laptops, monitors,
-server racks, glass boards, printed reports, paper documents, binders,
-floating spreadsheet panels, dashboard screens, warning icons, workflow cards.
+Realistic segmented corporate office: lounge with sofas, architect station,
+planner/coordinator table, developer zone, UI reviewer design zone, meeting room,
+validator desk, pantry, server rack, glass partitions, whiteboards, sticky notes,
+risk monitoring area with red warning dashboard, laptops, monitors, reports, binders,
+black floating room labels reading Architect, Developer, Planner / Coordinator,
+UI Reviewer, Validator, Lounge, Meeting Room, Pantry, and Risk Monitoring Area.
 `.trim();
 
 export const colorSystem = `
@@ -21,8 +25,8 @@ with strong red accents only for alerts, risks, and critical indicators.
 `.trim();
 
 export const negativePrompt = `
-No cartoon style, no pixel art, no game UI, no cyberpunk neon,
-no dark background, no low-poly objects, no watermark, no blurry details.
+No cartoon style, no pixel art, no flat vector UI, no game UI, no cyberpunk neon,
+no dark background, no low-poly objects, no watermark, no blurry details, no fisheye lens.
 `.trim();
 
 export const SCENE_DEFAULTS = {

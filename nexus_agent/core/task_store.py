@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sqlite3
 import time
 from datetime import datetime, timezone
@@ -15,7 +16,10 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_DB = Path(__file__).resolve().parents[2] / "nexus_local.db"
+# Resolve the data directory from env (set by Docker) or fall back to the repo root.
+# Docker sets NEXUS_DATA_DIR=/app/data (a named volume) so SQLite files survive redeploys.
+_DATA_DIR   = Path(os.environ.get("NEXUS_DATA_DIR", str(Path(__file__).resolve().parents[2])))
+_DEFAULT_DB = _DATA_DIR / "nexus_local.db"
 
 
 class TaskStore:

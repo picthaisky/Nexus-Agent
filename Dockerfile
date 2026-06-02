@@ -60,6 +60,15 @@ RUN chmod +x /usr/local/bin/nexus-entrypoint
 # Install the package itself (non-editable for production)
 RUN pip install --no-cache-dir .
 
+# Create the persistent data directory that Docker will mount as a named volume.
+# Everything that must survive a redeploy lives here:
+#   /app/data/nexus_local.db        — task history, connected repos registry
+#   /app/data/nexus_playbook.db     — procedural memory / learned skills
+#   /app/data/nexus_skill_vault.db  — skill vault
+#   /app/data/repos/                — cloned Git repositories
+#   /app/data/docs/archive/         — archived Markdown documents
+RUN mkdir -p /app/data/repos /app/data/docs/archive
+
 # Set ownership
 RUN chown -R nexus:nexus /app
 

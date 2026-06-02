@@ -165,14 +165,14 @@ export default function Dashboard() {
 
         {/* Center Section: Agents/Isometric/Workspace */}
         <section className="flex-1 overflow-visible min-w-0 pr-0 lg:pr-2 order-1 lg:order-2">
-          {cells.length === 0 ? (
-            <div className="rounded-2xl border border-cyber-neon/20 bg-cyber-panel/50 p-6 md:p-12 text-center text-slate-400 text-sm md:text-base">
-              Waiting for agent telemetry…
-            </div>
-          ) : viewMode === "isometric" ? (
+          {viewMode === "isometric" ? (
             <ErrorBoundary>
               <IsometricRoom agents={agents} expEffects={expEffects} />
             </ErrorBoundary>
+          ) : cells.length === 0 ? (
+            <div className="rounded-2xl border border-cyber-neon/20 bg-cyber-panel/50 p-6 md:p-12 text-center text-slate-400 text-sm md:text-base">
+              Waiting for agent telemetry…
+            </div>
           ) : viewMode === "grid" ? (
             <ErrorBoundary>
               <div className="grid grid-cols-1 gap-4 md:gap-6 sm:grid-cols-2 xl:grid-cols-3">

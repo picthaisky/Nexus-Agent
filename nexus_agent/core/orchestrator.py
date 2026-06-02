@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from langgraph.graph import StateGraph, END
 from pathlib import Path
 from typing import Any, Callable, Dict, TypeVar
@@ -55,12 +56,17 @@ class Orchestrator:
     def __init__(self) -> None:
         self.repo_root = Path(__file__).resolve().parents[2]
 
+        # Persist databases inside the named Docker volume (NEXUS_DATA_DIR=/app/data).
+        # Falls back to repo root when running outside Docker.
+        data_dir = Path(os.environ.get("NEXUS_DATA_DIR", str(self.repo_root)))
+        data_dir.mkdir(parents=True, exist_ok=True)
+
         # Initialize Memory
         self.procedural_memory = ProceduralMemory(
-            db_path=str(self.repo_root / "nexus_playbook.db"),
+            db_path=str(data_dir / "nexus_playbook.db"),
             skill_dir=str(self.repo_root / "skills"),
         )
-        self.skill_vault = SkillVault(db_path=str(self.repo_root / "nexus_skill_vault.db"))
+        self.skill_vault = SkillVault(db_path=str(data_dir / "nexus_skill_vault.db"))
         self.knowledge_graph_engine = KnowledgeGraphEngine()
         self.latest_graph: RepoGraph | None = None
 

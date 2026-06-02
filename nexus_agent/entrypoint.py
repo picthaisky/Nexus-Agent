@@ -64,10 +64,17 @@ APP_NAME = settings.app_name
 APP_VERSION = settings.app_version
 ENVIRONMENT = settings.environment
 START_TIME = time.monotonic()
-DEFAULT_REPO_ROOT = os.getenv("NEXUS_REPO_ROOT", str(Path.cwd()))
+
+# All persistent data lives under NEXUS_DATA_DIR (mounted Docker volume /app/data).
+# Falls back to cwd so local dev still works without any env vars.
+_DATA_DIR = Path(os.getenv("NEXUS_DATA_DIR", str(Path.cwd())))
+_DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+DEFAULT_REPO_ROOT = os.getenv("NEXUS_REPO_ROOT", str(_DATA_DIR / "repos"))
+NEXUS_DOCS_DIR    = Path(os.getenv("NEXUS_DOCS_DIR", str(_DATA_DIR / "docs")))
 
 kg_engine = KnowledgeGraphEngine()
-skill_vault = SkillVault(db_path=os.getenv("SKILL_VAULT_DB", "nexus_skill_vault.db"))
+skill_vault = SkillVault(db_path=os.getenv("SKILL_VAULT_DB", str(_DATA_DIR / "nexus_skill_vault.db")))
 inference_engine: InferenceEngine | None = None
 
 
@@ -1045,41 +1052,35 @@ async def delete_roster_agent(agent_id: str):
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+def _archive_dir() -> Path:
+    """Returns the docs/archive directory, always inside NEXUS_DOCS_DIR (the volume)."""
+    d = NEXUS_DOCS_DIR / "archive"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 @app.post("/docs/archive", tags=["docs"])
 async def archive_doc(request: ArchiveDocRequest):
-    """Saves a Markdown document inside docs/archive/."""
-    from pathlib import Path
+    """Saves a Markdown document inside the persistent docs/archive directory."""
     filename = request.filename.strip()
     if not filename.endswith(".md"):
         filename += ".md"
-    
-    archive_dir = Path("docs/archive").resolve()
-    archive_dir.mkdir(parents=True, exist_ok=True)
-    
-    filepath = archive_dir / filename
+
+    filepath = _archive_dir() / filename
     try:
         content = request.content
         if not content.startswith("#"):
             content = f"# {request.title}\n\n{content}"
-        
         filepath.write_text(content, encoding="utf-8")
-        return {
-            "status": "archived",
-            "filename": filename,
-            "path": str(filepath)
-        }
+        return {"status": "archived", "filename": filename, "path": str(filepath)}
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
 
 @app.get("/docs/archive", tags=["docs"])
 async def list_archived_docs():
-    """Lists all archived Markdown documents in the system."""
-    from pathlib import Path
-    archive_dir = Path("docs/archive").resolve()
-    if not archive_dir.exists() or not archive_dir.is_dir():
-        return {"documents": []}
-    
+    """Lists all archived Markdown documents."""
+    archive_dir = _archive_dir()
     docs = []
     for f in archive_dir.glob("*.md"):
         try:
@@ -1089,13 +1090,12 @@ async def list_archived_docs():
                 if line.strip().startswith("#"):
                     title = line.lstrip("#").strip()
                     break
-            
             stat = f.stat()
             docs.append({
                 "filename": f.name,
                 "title": title,
                 "size_bytes": stat.st_size,
-                "modified_at": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat()
+                "modified_at": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
             })
         except Exception:
             pass
@@ -1104,13 +1104,10 @@ async def list_archived_docs():
 
 @app.get("/docs/archive/{filename}", tags=["docs"])
 async def get_archived_doc(filename: str):
-    """Retrieves the title and content of an archived Markdown document."""
-    from pathlib import Path
-    archive_dir = Path("docs/archive").resolve()
-    filepath = archive_dir / filename
-    if not filepath.exists() or not filepath.is_file():
+    """Retrieves a specific archived Markdown document."""
+    filepath = _archive_dir() / filename
+    if not filepath.is_file():
         raise HTTPException(status_code=404, detail="Document not found")
-    
     try:
         content = filepath.read_text(encoding="utf-8")
         title = filepath.stem.replace("-", " ").replace("_", " ").title()
@@ -1118,11 +1115,7 @@ async def get_archived_doc(filename: str):
             if line.strip().startswith("#"):
                 title = line.lstrip("#").strip()
                 break
-        return {
-            "filename": filename,
-            "title": title,
-            "content": content
-        }
+        return {"filename": filename, "title": title, "content": content}
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
@@ -1130,12 +1123,9 @@ async def get_archived_doc(filename: str):
 @app.delete("/docs/archive/{filename}", tags=["docs"])
 async def delete_archived_doc(filename: str):
     """Deletes an archived Markdown document."""
-    from pathlib import Path
-    archive_dir = Path("docs/archive").resolve()
-    filepath = archive_dir / filename
-    if not filepath.exists() or not filepath.is_file():
+    filepath = _archive_dir() / filename
+    if not filepath.is_file():
         raise HTTPException(status_code=404, detail="Document not found")
-    
     try:
         filepath.unlink()
         return {"status": "deleted", "filename": filename}
