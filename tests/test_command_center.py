@@ -119,9 +119,21 @@ class TestDashboardHub:
         hub = DashboardHub()
         snap = hub.snapshot()
         assert snap["type"] == "snapshot"
-        assert len(snap["agents"]) == 6
         ids = {a["agent_id"] for a in snap["agents"]}
-        assert ids == {"planner", "architect", "developer", "ui_weaver", "validator", "optimizer"}
+        # The roster now includes 10 specialist agents in addition to the
+        # original 6 core agents; verify all original core agents are present.
+        core_ids = {"planner", "architect", "developer", "ui_weaver", "validator", "optimizer"}
+        assert core_ids.issubset(ids), f"Core agents missing from roster: {core_ids - ids}"
+        # Verify new specialist agents are also registered
+        specialist_ids = {
+            "code_reviewer", "debugger", "qa_tester", "db_architect",
+            "devops", "data_analyst", "project_mgr", "security",
+            "rag_agent", "api_integration",
+        }
+        assert specialist_ids.issubset(ids), f"Specialist agents missing: {specialist_ids - ids}"
+        assert len(snap["agents"]) == len(core_ids) + len(specialist_ids), (
+            f"Expected {len(core_ids) + len(specialist_ids)} agents, got {len(snap['agents'])}"
+        )
 
     def test_connect_sends_snapshot(self):
         hub = DashboardHub()
