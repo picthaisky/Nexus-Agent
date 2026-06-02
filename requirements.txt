@@ -44,7 +44,7 @@ aiofiles>=23.0
 
 # ── File parsing ─────────────────────────────────────────────────────────────
 python-multipart>=0.0.9    # required for FastAPI file uploads
-Jinja2>=3.1.0              # email templates
+Jinja2>=3.1.6              # email templates
 
 # ── Data export ─────────────────────────────────────────────────────────────
 openpyxl>=3.1.0            # Excel export
