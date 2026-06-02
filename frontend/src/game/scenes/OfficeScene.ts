@@ -11,8 +11,8 @@ const dist = (x1: number, y1: number, x2: number, y2: number) =>
     Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
 
 // ─── Grid constants ───────────────────────────────────────────────────────────
-const GRID_W   = 20;
-const GRID_H   = 16;
+const GRID_W   = 24;
+const GRID_H   = 18;
 const TILE_W   = 64;
 const TILE_H   = 32;
 const MOVE_SPD = 0.07;
@@ -21,6 +21,7 @@ const MOVE_SPD = 0.07;
 const P = {
     // Studio background
     BG:             0xf8f9fb,
+    FLOOR_SHADOW:   0xd7dce3,
 
     // Floor tiles — zone-tinted
     FLOOR:          0xeeeeee,   // base grey tile
@@ -28,7 +29,8 @@ const P = {
     Z_DEV:          0xf5ede0,   // warm parquet (wood-hinted)
     Z_DESIGN:       0xedeef4,   // cool light carpet
     Z_MEET:         0xf0f2f0,   // neutral tile
-    Z_LOUNGE:       0xfaf2e4,   // warm
+    Z_LOUNGE:       0xf4dfbd,   // warm wood lounge
+    Z_RISK:         0xffe2e2,   // alert-tinted monitoring deck
     Z_PANTRY:       0xf2f2f0,   // neutral
 
     // ── Warm wood desk system ──────────────────────────────────────────────
@@ -48,10 +50,10 @@ const P = {
     TBL_SIDE:       0x9ca3af,
     MEET_CHAIR:     0x374151,
 
-    // ── ORANGE sofa (key reference element) ──────────────────────────────
-    SOFA_SEAT:      0xe07b39,   // orange — as in reference
-    SOFA_BACK:      0xc96b2a,   // darker orange
-    SOFA_ARM:       0xd47430,   // armrest
+    // ── Warm lounge sofa system ──────────────────────────────────────────
+    SOFA_SEAT:      0xe8dfd4,
+    SOFA_BACK:      0xcab9a8,
+    SOFA_ARM:       0xd8c7b7,
 
     // Coffee table (lounge) — white
     CTB_TOP:        0xf8f8f8,
@@ -75,6 +77,11 @@ const P = {
     // ── Glass partitions between zones ────────────────────────────────────
     GLASS:          0xcde4f0,   // blue-grey glass tint
     GLASS_FRAME:    0x94a3b8,   // aluminium frame
+    WALL:           0xf8fafc,
+    WALL_FRAME:     0xcbd5e1,
+    SIGN_BG:        0x13233a,
+    SERVER:         0x111827,
+    SERVER_LIGHT:   0x38bdf8,
 
     // Status/role accents
     ALERT:          0xdc2626,
@@ -101,20 +108,21 @@ const ROLE_ACCENT: Record<string, number> = {
 };
 
 const AGENT_DESKS: Record<string, { cartX: number; cartY: number }> = {
-    planner:   { cartX: 3,  cartY: 2 },
-    architect: { cartX: 6,  cartY: 2 },
-    developer: { cartX: 3,  cartY: 5 },
-    ui_weaver: { cartX: 12, cartY: 2 },
-    validator: { cartX: 15, cartY: 2 },
-    optimizer: { cartX: 12, cartY: 5 },
+    planner:   { cartX: 9,  cartY: 7 },
+    architect: { cartX: 11, cartY: 2 },
+    developer: { cartX: 15, cartY: 3 },
+    ui_weaver: { cartX: 18, cartY: 8 },
+    validator: { cartX: 16, cartY: 14 },
+    optimizer: { cartX: 4,  cartY: 13 },
 };
 
 const ZONES = {
-    dev:     { x1: 1,  y1: 1,  x2: 9,  y2: 7,  floor: P.Z_DEV,    accent: 0x1d4ed8 },
-    design:  { x1: 10, y1: 1,  x2: 18, y2: 7,  floor: P.Z_DESIGN,  accent: 0x7c3aed },
-    meeting: { x1: 5,  y1: 8,  x2: 14, y2: 13, floor: P.Z_MEET,    accent: 0x166534 },
-    lounge:  { x1: 1,  y1: 8,  x2: 4,  y2: 13, floor: P.Z_LOUNGE,  accent: 0xe07b39 },
-    pantry:  { x1: 15, y1: 8,  x2: 18, y2: 13, floor: P.Z_PANTRY,  accent: 0x92400e },
+    lounge:  { x1: 1,  y1: 2,  x2: 6,  y2: 7,  floor: P.Z_LOUNGE,  accent: 0x9a5c2c },
+    risk:    { x1: 1,  y1: 10, x2: 7,  y2: 16, floor: P.Z_RISK,    accent: P.ALERT },
+    meeting: { x1: 7,  y1: 8,  x2: 14, y2: 14, floor: P.Z_MEET,    accent: 0x166534 },
+    dev:     { x1: 9,  y1: 1,  x2: 17, y2: 7,  floor: P.Z_DEV,    accent: 0x1d4ed8 },
+    design:  { x1: 15, y1: 6,  x2: 22, y2: 12, floor: P.Z_DESIGN,  accent: 0x7c3aed },
+    pantry:  { x1: 18, y1: 12, x2: 22, y2: 16, floor: P.Z_PANTRY,  accent: 0x92400e },
 };
 
 interface AgentSpriteData {
@@ -137,7 +145,7 @@ export class OfficeScene extends Scene {
     private agentSprites: Map<string, AgentSpriteData> = new Map();
     private agentStates:  Record<string, AgentRuntimeState> = {};
 
-    private playerCart   = { x: 9.5, y: 10.5 };
+    private playerCart   = { x: 13, y: 10 };
     private playerCont!:   Phaser.GameObjects.Container;
     private playerGfx!:    Phaser.GameObjects.Graphics;
     private cursors!:      Phaser.Types.Input.Keyboard.CursorKeys;
@@ -155,6 +163,7 @@ export class OfficeScene extends Scene {
 
     create() {
         this.cameras.main.setBackgroundColor('#f8f9fb');
+        this.cameras.main.setZoom(0.66);
         this.buildWalkable();
         this.drawFloor();
         this.drawGlassPartitions();
@@ -189,10 +198,17 @@ export class OfficeScene extends Scene {
         this.walkable = Array.from({ length: GRID_H }, () => Array(GRID_W).fill(true));
         for (let x = 0; x < GRID_W; x++) { this.walkable[0][x] = this.walkable[GRID_H - 1][x] = false; }
         for (let y = 0; y < GRID_H; y++) { this.walkable[y][0] = this.walkable[y][GRID_W - 1] = false; }
-        for (const d of Object.values(AGENT_DESKS)) { this.sw(d.cartX, d.cartY, false); this.sw(d.cartX - 1, d.cartY, false); }
-        for (let x = 9; x <= 10; x++) for (let y = 9; y <= 10; y++) this.sw(x, y, false);
-        this.sw(2, 10, false); this.sw(2, 11, false);
-        this.sw(17, 3, false); this.sw(17, 9, false);
+        for (const d of Object.values(AGENT_DESKS)) {
+            this.sw(d.cartX, d.cartY, false);
+            this.sw(d.cartX - 1, d.cartY, false);
+            this.sw(d.cartX, d.cartY + 1, false);
+        }
+        for (let x = 8; x <= 12; x++) for (let y = 9; y <= 11; y++) this.sw(x, y, false);
+        for (let x = 2; x <= 5; x++) for (let y = 3; y <= 5; y++) this.sw(x, y, false);
+        for (let x = 2; x <= 5; x++) for (let y = 12; y <= 14; y++) this.sw(x, y, false);
+        for (let x = 19; x <= 21; x++) for (let y = 13; y <= 15; y++) this.sw(x, y, false);
+        this.sw(21, 4, false); this.sw(22, 4, false); this.sw(21, 5, false);
+        this.sw(18, 4, false); this.sw(19, 8, false); this.sw(13, 2, false);
     }
 
     private sw(x: number, y: number, v: boolean) {
@@ -230,14 +246,18 @@ export class OfficeScene extends Scene {
                     this.diamond(g, p.x, p.y);
                 }
             }
+            this.drawZoneRim(zone);
         }
 
-        // Zone label markers (small, understated)
-        this.zoneLabel('Developer Zone',  ZONES.dev.x1    + 2, ZONES.dev.y1,    0x1d4ed8);
-        this.zoneLabel('Design Zone',     ZONES.design.x1 + 2, ZONES.design.y1, 0x7c3aed);
-        this.zoneLabel('Meeting Room',    ZONES.meeting.x1+ 2, ZONES.meeting.y1,0x166534);
-        this.zoneLabel('Lounge',          ZONES.lounge.x1,     ZONES.lounge.y1, 0xe07b39);
-        this.zoneLabel('Pantry',          ZONES.pantry.x1,     ZONES.pantry.y1, 0x92400e);
+        this.zoneLabel('Lounge',              2.5, 2.1, 0x334155);
+        this.zoneLabel('Risk Monitoring Area',3.5, 10.2, P.ALERT);
+        this.zoneLabel('Planner / Coordinator',8.6, 7.1, 0x1d4ed8);
+        this.zoneLabel('Meeting Room',        9.2, 8.1, 0x166534);
+        this.zoneLabel('Architect',           10.6, 1.1, 0x0891b2);
+        this.zoneLabel('Developer',           15.1, 1.7, 0x166534);
+        this.zoneLabel('UI Reviewer',         18.2, 6.2, 0x7c3aed);
+        this.zoneLabel('Validator',           16.2, 13.1, P.ALERT);
+        this.zoneLabel('Pantry',              20.2, 12.1, 0x92400e);
     }
 
     private diamond(g: Phaser.GameObjects.Graphics, cx: number, cy: number,
@@ -250,25 +270,72 @@ export class OfficeScene extends Scene {
 
     private zoneLabel(text: string, cx: number, cy: number, color: number) {
         const p   = this.c2i(cx, cy);
-        const hex = '#' + color.toString(16).padStart(6, '0');
-        this.add.text(p.x, p.y - 16, text, {
+        const w = clamp(text.length * 5.4 + 18, 50, 124);
+        const bg = this.add.graphics();
+        bg.fillStyle(P.SIGN_BG, 0.95);
+        bg.lineStyle(1, color, 0.55);
+        bg.fillRoundedRect(-w / 2, -9, w, 18, 3);
+        bg.strokeRoundedRect(-w / 2, -9, w, 18, 3);
+        bg.fillStyle(color, 1);
+        bg.fillRect(-w / 2, -9, 4, 18);
+        const label = this.add.text(0, 0, text, {
             fontFamily: 'Inter, system-ui, sans-serif',
             fontSize: '8px',
-            color: hex,
-        }).setOrigin(0.5).setDepth(-90).setAlpha(0.75);
+            fontStyle: 'bold',
+            color: '#ffffff',
+        }).setOrigin(0.5);
+        const con = this.add.container(p.x, p.y - 36, [bg, label]).setDepth(p.y + 80);
+        con.setAlpha(0.94);
+    }
+
+    private drawZoneRim(zone: { x1: number; y1: number; x2: number; y2: number; accent: number }) {
+        const top = this.c2i(zone.x1, zone.y1);
+        const right = this.c2i(zone.x2, zone.y1);
+        const bottom = this.c2i(zone.x2, zone.y2);
+        const left = this.c2i(zone.x1, zone.y2);
+        const pts = [
+            { x: top.x, y: top.y - TILE_H / 2 },
+            { x: right.x + TILE_W / 2, y: right.y },
+            { x: bottom.x, y: bottom.y + TILE_H / 2 },
+            { x: left.x - TILE_W / 2, y: left.y },
+        ];
+        const g = this.add.graphics().setDepth(-145);
+
+        g.fillStyle(P.FLOOR_SHADOW, 0.45);
+        g.beginPath();
+        g.moveTo(pts[1].x, pts[1].y);
+        g.lineTo(pts[2].x, pts[2].y);
+        g.lineTo(pts[2].x, pts[2].y + 13);
+        g.lineTo(pts[1].x, pts[1].y + 13);
+        g.closePath(); g.fillPath();
+        g.beginPath();
+        g.moveTo(pts[2].x, pts[2].y);
+        g.lineTo(pts[3].x, pts[3].y);
+        g.lineTo(pts[3].x, pts[3].y + 13);
+        g.lineTo(pts[2].x, pts[2].y + 13);
+        g.closePath(); g.fillPath();
+
+        g.lineStyle(2, zone.accent, 0.34);
+        g.beginPath();
+        g.moveTo(pts[0].x, pts[0].y);
+        g.lineTo(pts[1].x, pts[1].y);
+        g.lineTo(pts[2].x, pts[2].y);
+        g.lineTo(pts[3].x, pts[3].y);
+        g.closePath(); g.strokePath();
     }
 
     // ── Glass Partitions ─────────────────────────────────────────────────────
 
     private drawGlassPartitions() {
-        // Vertical glass wall between Dev and Design zones (x=9-10 column, y=1..7)
-        for (let y = 1; y <= 7; y++) {
-            this.drawGlassPanel(9, y, 10, y);
-        }
-        // Partial glass around meeting room entrance
-        for (let x = 5; x <= 14; x++) {
-            this.drawGlassPanel(x, 8, x, 8);
-        }
+        for (let x = 9; x <= 17; x += 2) this.drawGlassPanel(x, 1, x + 1, 1);
+        for (let y = 6; y <= 12; y++) this.drawGlassPanel(15, y, 15, y);
+        for (let x = 7; x <= 14; x++) if (x < 9 || x > 11) this.drawGlassPanel(x, 8, x, 8);
+        for (let x = 1; x <= 6; x += 2) this.drawGlassPanel(x, 2, x + 1, 2);
+        for (let y = 10; y <= 16; y += 2) this.drawGlassPanel(7, y, 7, y + 1);
+        this.drawWallPanel(13.8, 1.4, 94, 56, 0x1d4ed8, 'analytics');
+        this.drawWallPanel(20.2, 6.6, 82, 62, 0x7c3aed, 'kanban');
+        this.drawWallPanel(9.8, 8.2, 118, 58, 0x166534, 'charts');
+        this.drawWallPanel(16.7, 13.0, 88, 50, P.ALERT, 'kanban');
     }
 
     private drawGlassPanel(x1: number, y1: number, x2: number, y2: number) {
@@ -290,41 +357,263 @@ export class OfficeScene extends Scene {
         g.strokePath();
     }
 
+    private drawWallPanel(cx: number, cy: number, w: number, h: number, accent: number, mode: 'analytics' | 'kanban' | 'charts') {
+        const p = this.c2i(cx, cy);
+        const g = this.add.graphics().setDepth(p.y - 48);
+
+        g.fillStyle(0x000000, 0.05);
+        g.fillRect(p.x - w / 2 + 5, p.y - h - 9, w, h);
+        g.fillStyle(P.WALL, 0.98);
+        g.lineStyle(1.5, P.WALL_FRAME, 0.85);
+        g.fillRect(p.x - w / 2, p.y - h - 12, w, h);
+        g.strokeRect(p.x - w / 2, p.y - h - 12, w, h);
+        g.fillStyle(accent, 0.12);
+        g.fillRect(p.x - w / 2 + 3, p.y - h - 9, w - 6, 8);
+
+        if (mode === 'kanban') {
+            const colors = [0xfef3c7, 0xdbeafe, 0xfce7f3, 0xdcfce7, 0xffedd5];
+            for (let i = 0; i < 12; i++) {
+                const x = p.x - w / 2 + 10 + (i % 4) * 17;
+                const y = p.y - h + 5 + Math.floor(i / 4) * 14;
+                g.fillStyle(colors[i % colors.length], 1);
+                g.lineStyle(0.4, 0xcbd5e1, 0.55);
+                g.fillRect(x, y, 12, 9);
+                g.strokeRect(x, y, 12, 9);
+            }
+            return;
+        }
+
+        if (mode === 'charts') {
+            g.lineStyle(1, 0x94a3b8, 0.45);
+            for (let i = 0; i < 4; i++) {
+                g.beginPath();
+                g.moveTo(p.x - w / 2 + 9, p.y - h + 6 + i * 10);
+                g.lineTo(p.x + w / 2 - 9, p.y - h + 6 + i * 10);
+                g.strokePath();
+            }
+            for (let i = 0; i < 6; i++) {
+                const bh = 8 + i * 4;
+                g.fillStyle(i % 2 ? 0x16a34a : accent, 0.55);
+                g.fillRect(p.x - w / 2 + 16 + i * 12, p.y - 17 - bh, 7, bh);
+            }
+            return;
+        }
+
+        g.lineStyle(1, accent, 0.65);
+        g.beginPath();
+        for (let i = 0; i < 7; i++) {
+            const x = p.x - w / 2 + 12 + i * 11;
+            const y = p.y - 26 - Math.sin(i * 0.9) * 12 - i * 2;
+            if (i === 0) g.moveTo(x, y); else g.lineTo(x, y);
+        }
+        g.strokePath();
+        g.fillStyle(0x2563eb, 0.18); g.fillCircle(p.x - 18, p.y - 43, 13);
+        g.lineStyle(3, accent, 0.75); g.strokeCircle(p.x - 18, p.y - 43, 13);
+        g.fillStyle(0xf59e0b, 0.75); g.fillRect(p.x + 12, p.y - 54, 28, 6);
+        g.fillStyle(0x16a34a, 0.75); g.fillRect(p.x + 12, p.y - 42, 38, 6);
+        g.fillStyle(0xdc2626, 0.75); g.fillRect(p.x + 12, p.y - 30, 20, 6);
+    }
+
+    private drawPresentationScreen(cx: number, cy: number) {
+        const p = this.c2i(cx, cy);
+        const g = this.add.graphics().setDepth(p.y - 16);
+        g.fillStyle(0xffffff, 0.98);
+        g.lineStyle(1.5, 0x94a3b8, 0.85);
+        g.fillRect(p.x - 46, p.y - 74, 92, 54);
+        g.strokeRect(p.x - 46, p.y - 74, 92, 54);
+        g.fillStyle(0xdbeafe, 1);
+        g.fillRect(p.x - 40, p.y - 66, 48, 26);
+        g.fillStyle(0x2563eb, 0.75);
+        for (let i = 0; i < 5; i++) g.fillRect(p.x - 36 + i * 8, p.y - 42 - i * 4, 5, 8 + i * 4);
+        g.lineStyle(1, 0xef4444, 0.7);
+        g.beginPath(); g.moveTo(p.x + 14, p.y - 60); g.lineTo(p.x + 38, p.y - 36); g.strokePath();
+        g.fillStyle(0x94a3b8, 1);
+        g.fillRect(p.x - 3, p.y - 20, 6, 18);
+        g.fillRect(p.x - 14, p.y - 3, 28, 3);
+    }
+
+    private drawLoungeMediaWall(cx: number, cy: number) {
+        const p = this.c2i(cx, cy);
+        const g = this.add.graphics().setDepth(p.y - 14);
+        g.fillStyle(0x4b5563, 1);
+        g.fillRect(p.x - 34, p.y - 50, 68, 34);
+        g.fillStyle(0x0f172a, 1);
+        g.fillRect(p.x - 30, p.y - 46, 60, 26);
+        g.fillStyle(0x38bdf8, 0.28);
+        g.fillRect(p.x - 27, p.y - 43, 54, 20);
+        g.fillStyle(0xffffff, 0.18);
+        g.fillRect(p.x - 24, p.y - 40, 20, 5);
+        g.fillStyle(P.WOOD_FRONT, 1);
+        g.fillRect(p.x - 38, p.y - 14, 76, 10);
+        g.fillStyle(P.WOOD_TOP, 1);
+        g.fillRect(p.x - 34, p.y - 20, 68, 6);
+    }
+
+    private drawServerRack(cx: number, cy: number) {
+        const p = this.c2i(cx, cy);
+        const g = this.add.graphics().setDepth(p.y - 18);
+        g.fillStyle(0x000000, 0.09);
+        g.fillEllipse(p.x, p.y + 2, 42, 12);
+        g.fillStyle(P.SERVER, 1);
+        g.lineStyle(1.5, 0x0f172a, 0.9);
+        g.fillRoundedRect(p.x - 18, p.y - 86, 36, 82, 3);
+        g.strokeRoundedRect(p.x - 18, p.y - 86, 36, 82, 3);
+        for (let i = 0; i < 8; i++) {
+            const y = p.y - 78 + i * 9;
+            g.fillStyle(0x1f2937, 1);
+            g.fillRect(p.x - 14, y, 28, 6);
+            g.fillStyle(P.SERVER_LIGHT, 0.9);
+            g.fillCircle(p.x + 9, y + 3, 1.5);
+            g.fillStyle(i % 3 === 0 ? P.ALERT : 0x16a34a, 0.8);
+            g.fillCircle(p.x + 13, y + 3, 1.3);
+        }
+    }
+
+    private drawPantryCounter(cx: number, cy: number) {
+        const p = this.c2i(cx, cy);
+        const g = this.add.graphics().setDepth(p.y - 7);
+        g.fillStyle(P.WOOD_FRONT, 1);
+        g.fillRect(p.x - 48, p.y - 38, 96, 32);
+        g.fillStyle(P.WOOD_TOP, 1);
+        g.fillRect(p.x - 52, p.y - 45, 104, 10);
+        g.lineStyle(0.8, P.WOOD_EDGE, 0.55);
+        for (let i = 0; i < 4; i++) g.strokeRect(p.x - 46 + i * 24, p.y - 34, 22, 27);
+        g.fillStyle(0xf8fafc, 1);
+        g.lineStyle(0.8, 0xcbd5e1, 0.8);
+        g.fillRect(p.x + 38, p.y - 84, 28, 70);
+        g.strokeRect(p.x + 38, p.y - 84, 28, 70);
+        g.fillStyle(0xe2e8f0, 1);
+        g.fillRect(p.x + 41, p.y - 50, 22, 2);
+        g.fillStyle(0x94a3b8, 1);
+        g.fillRect(p.x + 58, p.y - 70, 3, 10);
+    }
+
+    private drawCafeTable(cx: number, cy: number) {
+        const p = this.c2i(cx, cy);
+        const g = this.add.graphics().setDepth(p.y - 3);
+        g.fillStyle(0x000000, 0.06);
+        g.fillEllipse(p.x, p.y + 3, 56, 18);
+        g.fillStyle(0xf8fafc, 1);
+        g.lineStyle(0.7, 0xcbd5e1, 0.9);
+        g.fillEllipse(p.x, p.y - 11, 42, 20);
+        g.strokeEllipse(p.x, p.y - 11, 42, 20);
+        g.fillStyle(P.WOOD_EDGE, 1);
+        g.fillRect(p.x - 3, p.y - 9, 6, 16);
+        for (const [ox, oy] of [[-30, -5], [31, -4], [0, 18]] as const) {
+            g.fillStyle(0x334155, 1);
+            g.fillEllipse(p.x + ox, p.y + oy, 20, 9);
+            g.fillStyle(0x475569, 1);
+            g.fillRect(p.x + ox - 6, p.y + oy - 16, 12, 12);
+        }
+    }
+
+    private drawRiskMonitoringDeck(cx: number, cy: number) {
+        const p = this.c2i(cx, cy);
+        const g = this.add.graphics().setDepth(p.y - 24);
+
+        g.fillStyle(0x991b1b, 0.18);
+        g.lineStyle(2, P.ALERT, 0.65);
+        g.beginPath();
+        g.moveTo(p.x - 110, p.y + 2);
+        g.lineTo(p.x - 12, p.y + 52);
+        g.lineTo(p.x + 110, p.y - 4);
+        g.lineTo(p.x + 8, p.y - 58);
+        g.closePath(); g.fillPath(); g.strokePath();
+
+        g.fillStyle(0x111827, 1);
+        g.fillRoundedRect(p.x - 96, p.y - 112, 192, 74, 4);
+        g.lineStyle(1.2, P.ALERT, 0.75);
+        g.strokeRoundedRect(p.x - 96, p.y - 112, 192, 74, 4);
+        g.fillStyle(P.ALERT, 0.92);
+        g.fillRect(p.x - 96, p.y - 112, 192, 13);
+
+        this.add.text(p.x - 88, p.y - 105, 'RISK MONITORING AREA', {
+            fontFamily: 'Inter, system-ui, sans-serif',
+            fontSize: '8px',
+            fontStyle: 'bold',
+            color: '#ffffff',
+        }).setDepth(p.y + 40);
+
+        const screenColors = [0x0f172a, 0x172554, 0x111827];
+        for (let i = 0; i < 3; i++) {
+            const x = p.x - 86 + i * 61;
+            g.fillStyle(screenColors[i], 1);
+            g.fillRect(x, p.y - 92, 54, 42);
+            g.lineStyle(0.7, 0x334155, 0.8);
+            g.strokeRect(x, p.y - 92, 54, 42);
+            g.lineStyle(1, i === 0 ? P.ALERT : i === 1 ? 0x38bdf8 : 0x16a34a, 0.8);
+            g.beginPath();
+            for (let k = 0; k < 6; k++) {
+                const px = x + 7 + k * 8;
+                const py = p.y - 60 - Math.sin(k + i) * 11 - k * 1.5;
+                if (k === 0) g.moveTo(px, py); else g.lineTo(px, py);
+            }
+            g.strokePath();
+        }
+
+        g.fillStyle(P.WOOD_FRONT, 1);
+        g.fillRoundedRect(p.x - 62, p.y - 36, 124, 28, 3);
+        g.fillStyle(0x1f2937, 1);
+        for (let i = 0; i < 3; i++) g.fillRect(p.x - 48 + i * 36, p.y - 52, 28, 18);
+        for (const [label, value, ox] of [['IDENTIFIED', '23', -70], ['AT RISK', '13', 0], ['RESOLVED', '10', 70]] as const) {
+            g.fillStyle(0x1f2937, 0.96);
+            g.fillRoundedRect(p.x + ox - 30, p.y + 12, 60, 34, 2);
+            g.lineStyle(0.7, 0x475569, 0.8);
+            g.strokeRoundedRect(p.x + ox - 30, p.y + 12, 60, 34, 2);
+            this.add.text(p.x + ox, p.y + 20, label, {
+                fontFamily: 'Inter, system-ui, sans-serif', fontSize: '5px', color: '#cbd5e1',
+            }).setOrigin(0.5).setDepth(p.y + 40);
+            this.add.text(p.x + ox, p.y + 35, value, {
+                fontFamily: 'Inter, system-ui, sans-serif', fontSize: '14px', fontStyle: 'bold', color: '#ffffff',
+            }).setOrigin(0.5).setDepth(p.y + 40);
+        }
+    }
+
     // ── Furniture ────────────────────────────────────────────────────────────
 
     private drawFurniture() {
-        // Desks per agent
         for (const [role, pos] of Object.entries(AGENT_DESKS)) {
             const accent = ROLE_ACCENT[role] ?? 0x94a3b8;
             this.drawDesk(pos.cartX, pos.cartY, accent);
+            this.drawErgonomicChair(pos.cartX + 0.55, pos.cartY + 0.85);
         }
+
+        this.drawDesk(13.4, 4.6, ROLE_ACCENT.developer);
+        this.drawErgonomicChair(14, 5.35);
+        this.drawDesk(18.8, 9.6, ROLE_ACCENT.ui_weaver);
+        this.drawErgonomicChair(19.4, 10.4);
 
         // Meeting table + chairs
-        this.drawMeetingTable(9.5, 9.5);
-        for (const [dx, dy] of [[-1.5,0],[1.5,0],[0,-1.5],[0,1.5],[-1,-1],[1,1]] as const) {
-            this.drawMeetingChair(9.5 + dx, 9.5 + dy);
+        this.drawMeetingTable(10.2, 10.6);
+        for (const [dx, dy] of [[-1.8,0],[1.8,0],[0,-1.7],[0,1.7],[-1.2,-1.1],[1.2,1.1]] as const) {
+            this.drawMeetingChair(10.2 + dx, 10.6 + dy);
         }
+        this.drawPresentationScreen(8.1, 8.5);
 
-        // ORANGE sofa (lounge) — matches reference
-        this.drawSofa(2, 10.5);
-        this.drawCoffeeTable(3, 11);
+        // Lounge cluster
+        this.drawSofa(3.1, 4.8);
+        this.drawSofa(4.7, 3.5);
+        this.drawCoffeeTable(3.8, 5.2);
+        this.drawLoungeMediaWall(2.3, 3.2);
 
-        // Whiteboard
-        this.drawWhiteboard(17, 2);
+        // Developer and design support objects
+        this.drawWhiteboard(12.4, 2.1);
+        this.drawServerRack(21.6, 4.8);
+        this.drawBookshelf(21.4, 8.6);
 
         // Plants with white ceramic pots
-        for (const [px, py] of [[8.5,6.5],[1.5,1.5],[18.5,7.5],[4.5,13.5]] as const) {
+        for (const [px, py] of [[7.5,7.1],[1.4,2.4],[6.2,7.2],[17.2,6.3],[22.1,12.4],[13.6,15.0],[21.8,16.0]] as const) {
             this.drawPlant(px, py);
         }
 
-        // Coffee machine — light grey (matches reference)
-        this.drawCoffeeMachine(16, 9);
+        // Pantry area
+        this.drawPantryCounter(20, 14.1);
+        this.drawCoffeeMachine(19.2, 13.2);
+        this.drawCafeTable(21.2, 15.1);
 
-        // Risk board
-        this.drawRiskBoard(15, 5);
-
-        // Bookshelf in design zone
-        this.drawBookshelf(18, 3);
+        // Risk monitoring area
+        this.drawRiskMonitoringDeck(3.9, 13.1);
+        this.drawRiskBoard(6.4, 11.1);
     }
 
     /** Warm-wood desk with proper isometric box + monitor */
@@ -1008,8 +1297,11 @@ export class OfficeScene extends Scene {
             const agent = this.agentStates[id]; if (!agent) continue;
             d.wanderTimer -= dt;
             const desk = AGENT_DESKS[id] ?? { cartX: 5, cartY: 5 };
-            const zone = id === 'planner' || id === 'developer' ? ZONES.dev
-                : id === 'ui_weaver' || id === 'validator' || id === 'optimizer' ? ZONES.design
+            const zone = id === 'planner' ? ZONES.meeting
+                : id === 'architect' || id === 'developer' ? ZONES.dev
+                : id === 'ui_weaver' ? ZONES.design
+                : id === 'validator' ? ZONES.pantry
+                : id === 'optimizer' ? ZONES.risk
                 : ZONES.meeting;
 
             if (agent.current_micro_state === 'walking' || agent.current_micro_state === 'idle') {

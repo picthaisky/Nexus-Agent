@@ -14,6 +14,9 @@ interface ImportMetaEnv {
   /** WebSocket URL override, e.g. wss://nexus.example.com/ws/dashboard.
    *  If unset, derived automatically from location.protocol + location.host. */
   readonly VITE_NEXUS_WS_URL?: string;
+
+  /** Optional HD bitmap used as the primary Isometric Office scene. */
+  readonly VITE_OFFICE_MAP_IMAGE_URL?: string;
 }
 
 interface ImportMeta {

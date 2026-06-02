@@ -15,6 +15,7 @@ export default defineConfig({
       "/agents": { target: "http://localhost:8080", changeOrigin: true },
       "/repo": { target: "http://localhost:8080", changeOrigin: true },
       "/docs": { target: "http://localhost:8080", changeOrigin: true },
+      "/scene": { target: "http://localhost:8080", changeOrigin: true },
       "/ws":  { target: "ws://localhost:8080",   ws: true, changeOrigin: true }
     }
   }

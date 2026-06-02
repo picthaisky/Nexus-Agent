@@ -16,6 +16,7 @@ const ZONE_LEGEND = [
   { name: "Developer Zone", dot: "bg-blue-700",   text: "text-blue-700" },
   { name: "Design Zone",    dot: "bg-violet-700", text: "text-violet-700" },
   { name: "Meeting Room",   dot: "bg-green-800",  text: "text-green-800" },
+  { name: "Risk Monitoring", dot: "bg-red-700",    text: "text-red-700" },
   { name: "Lounge",         dot: "bg-amber-800",  text: "text-amber-800" },
   { name: "Pantry",         dot: "bg-orange-700", text: "text-orange-700" },
 ];
@@ -60,6 +61,31 @@ const ROLE_STYLES: Record<string, RoleStyle> = {
 };
 const DEFAULT_ROLE_STYLE: RoleStyle = { stripe: "bg-slate-600", text: "text-slate-600", dot: "bg-slate-600" };
 
+const STATIC_HD_SCENE_URL = ((import.meta as any).env?.VITE_OFFICE_MAP_IMAGE_URL as string | undefined) || "";
+const HD_SCENE_STORAGE_KEY = "nexus.officeMapHdUrl";
+
+function getStoredHdSceneUrl() {
+  try {
+    return window.localStorage.getItem(HD_SCENE_STORAGE_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+function getSceneGenerateUrl() {
+  const base = ((import.meta as any).env?.VITE_NEXUS_API_URL as string | undefined)?.replace(/\/$/, "");
+  return base ? `${base}/scene/generate` : "/api/scene/generate";
+}
+
+const HD_AGENT_MARKERS: Record<string, string> = {
+  planner: "left-[45%] top-[38%]",
+  architect: "left-[43%] top-[17%]",
+  developer: "left-[60%] top-[23%]",
+  ui_weaver: "left-[72%] top-[43%]",
+  validator: "left-[62%] top-[70%]",
+  optimizer: "left-[20%] top-[72%]",
+};
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function IsometricRoom({ agents, expEffects }: IsometricRoomProps) {
@@ -70,16 +96,19 @@ export function IsometricRoom({ agents, expEffects }: IsometricRoomProps) {
   // Scene generation state
   const [genState, setGenState] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [sceneImage, setSceneImage] = useState<SceneGenerateResponse | null>(null);
+  const [storedHdSceneUrl, setStoredHdSceneUrl] = useState(getStoredHdSceneUrl);
   const [genError, setGenError] = useState<string | null>(null);
   const [showModal, setShowModal] = useState(false);
+  const [renderMode, setRenderMode] = useState<"interactive" | "hd">(
+    STATIC_HD_SCENE_URL || getStoredHdSceneUrl() ? "hd" : "interactive",
+  );
 
   const handleGenerateScene = useCallback(async () => {
     setGenState("loading");
     setGenError(null);
     try {
       const key = (window as any).__NEXUS_API_KEY__ || "";
-      const base = (import.meta as any).env?.VITE_NEXUS_API_URL || "";
-      const res = await fetch(`${base}/scene/generate`, {
+      const res = await fetch(getSceneGenerateUrl(), {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-API-Key": key },
         body: JSON.stringify(SCENE_DEFAULTS),
@@ -90,10 +119,20 @@ export function IsometricRoom({ agents, expEffects }: IsometricRoomProps) {
       }
       const data: SceneGenerateResponse = await res.json();
       setSceneImage(data);
+      setStoredHdSceneUrl(data.url);
+      try {
+        window.localStorage.setItem(HD_SCENE_STORAGE_KEY, data.url);
+      } catch {
+        /* ignore storage errors */
+      }
       setGenState("done");
-      setShowModal(true);
+      setRenderMode("hd");
+      setShowModal(false);
     } catch (e: any) {
-      setGenError(e.message || "Generation failed");
+      const message = e instanceof TypeError && e.message === "Failed to fetch"
+        ? "Cannot reach the scene generation API. Check that the backend is running and VITE_NEXUS_API_URL or the /api proxy is configured."
+        : e.message || "Generation failed";
+      setGenError(message);
       setGenState("error");
     }
   }, []);
@@ -128,22 +167,23 @@ export function IsometricRoom({ agents, expEffects }: IsometricRoomProps) {
   }, [agents, selectedAgent]);
 
   const proximityAgent = proximityAgentId ? agents[proximityAgentId] : null;
+  const hdSceneUrl = sceneImage?.url || STATIC_HD_SCENE_URL || storedHdSceneUrl;
 
   return (
     <div className="relative w-full h-[500px] md:h-[620px] lg:h-[720px] flex items-center justify-center overflow-hidden border border-slate-200 bg-white rounded-2xl shadow-lg">
 
       {/* Header — clean corporate badge */}
-      <div className="absolute top-3 left-4 z-10 pointer-events-none select-none">
+      <div className="absolute z-10 pointer-events-none select-none top-3 left-4">
         <div className="flex items-center gap-1.5 bg-white/90 border border-slate-200 rounded-md px-2.5 py-1 shadow-sm">
-          <span className="w-2 h-2 rounded-full bg-blue-600 animate-pulse" />
+          <span className="w-2 h-2 bg-blue-600 rounded-full animate-pulse" />
           <span className="text-[9px] font-semibold text-slate-500 tracking-wide uppercase">
-            Virtual Workspace · Corporate Operations
+            Virtual Workspace · 3D Isometric Office Map
           </span>
         </div>
       </div>
 
       {/* Zone Legend — top right */}
-      <div className="absolute top-3 right-4 z-10 flex flex-col gap-1 pointer-events-none">
+      <div className="absolute z-10 flex flex-col gap-1 pointer-events-none top-3 right-4">
         {ZONE_LEGEND.map((z) => (
           <div key={z.name} className="flex items-center gap-1.5 bg-white/85 border border-slate-100 rounded px-2 py-0.5 shadow-sm">
             <span className={`w-2 h-2 rounded-full flex-none ${z.dot}`} />
@@ -153,12 +193,38 @@ export function IsometricRoom({ agents, expEffects }: IsometricRoomProps) {
       </div>
 
       {/* Phaser Canvas */}
-      <div className="w-full h-full relative">
-        <PhaserGame ref={phaserRef} />
+      <div className="relative w-full h-full">
+        {renderMode === "hd" && hdSceneUrl ? (
+          <div className="absolute inset-0 bg-[#f8f9fb]">
+            <img
+              src={hdSceneUrl}
+              alt="High fidelity 3D isometric office map"
+              className="h-full w-full object-contain drop-shadow-[0_24px_60px_rgba(15,23,42,0.18)]"
+            />
+            {Object.entries(agents).map(([agentId, agent]) => {
+              const marker = HD_AGENT_MARKERS[agentId];
+              const rs = ROLE_STYLES[agent.role] ?? DEFAULT_ROLE_STYLE;
+              if (!marker) return null;
+              return (
+                <button
+                  key={agentId}
+                  type="button"
+                  onClick={() => setSelectedAgent(agent)}
+                  className={`absolute -translate-x-1/2 -translate-y-1/2 rounded-full border border-white bg-white/90 p-1 shadow-lg shadow-slate-900/15 backdrop-blur transition-transform hover:scale-110 ${marker}`}
+                  title={agent.display_name}
+                >
+                  <span className={`block h-2.5 w-2.5 rounded-full ${rs.dot} ${agent.current_micro_state !== "idle" ? "animate-pulse" : ""}`} />
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <PhaserGame ref={phaserRef} />
+        )}
       </div>
 
       {/* Controls hint */}
-      <div className="absolute bottom-3 left-4 z-10 pointer-events-none select-none">
+      <div className="absolute z-10 pointer-events-none select-none bottom-3 left-4">
         <div className="flex items-center gap-2 bg-white/80 border border-slate-200 rounded px-2.5 py-1 shadow-sm">
           {([ ["WASD", "Move"], ["E", "Profile"], ["Scroll", "Zoom"] ] as const).map(([key, desc]) => (
             <span key={key} className="flex items-center gap-1 text-[8px] text-slate-400">
@@ -171,7 +237,7 @@ export function IsometricRoom({ agents, expEffects }: IsometricRoomProps) {
 
       {/* Proximity prompt */}
       {proximityAgent && !selectedAgent && (
-        <div className="absolute bottom-12 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 bg-white border border-blue-200 rounded-lg px-4 py-2 shadow-md animate-pulse">
+        <div className="absolute z-20 flex items-center gap-2 px-4 py-2 -translate-x-1/2 bg-white border border-blue-200 rounded-lg shadow-md bottom-12 left-1/2 animate-pulse">
           <kbd className="px-1.5 py-0.5 rounded border border-blue-300 bg-blue-50 text-blue-700 font-mono text-[9px] font-bold">E</kbd>
           <span className="text-[10px] text-slate-600">
             View profile —{" "}
@@ -185,55 +251,85 @@ export function IsometricRoom({ agents, expEffects }: IsometricRoomProps) {
         <AgentDetailCard agent={selectedAgent} onClose={() => setSelectedAgent(null)} />
       )}
 
-      {/* Generate Corporate Scene button — bottom right */}
-      <div className="absolute bottom-3 right-4 z-10">
+      {/* Render controls — bottom right */}
+      <div className="absolute bottom-3 right-4 z-10 flex flex-col items-end gap-1.5">
+        <div className="flex rounded-lg border border-slate-200 bg-white/90 p-0.5 shadow-sm backdrop-blur">
+          <button
+            type="button"
+            onClick={() => setRenderMode("interactive")}
+            className={`rounded-md px-2 py-1 text-[9px] font-semibold transition-colors ${renderMode === "interactive" ? "bg-blue-50 text-blue-700" : "text-slate-500 hover:text-slate-700"}`}
+          >
+            Interactive
+          </button>
+          <button
+            type="button"
+            onClick={() => hdSceneUrl && setRenderMode("hd")}
+            disabled={!hdSceneUrl}
+            className={`rounded-md px-2 py-1 text-[9px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${renderMode === "hd" ? "bg-blue-50 text-blue-700" : "text-slate-500 hover:text-slate-700"}`}
+          >
+            HD Render
+          </button>
+        </div>
         {genState === "error" && genError && (
           <div className="mb-1 text-[9px] text-red-600 bg-red-50 border border-red-200 rounded px-2 py-1 max-w-48 text-right">
             {genError}
           </div>
         )}
-        <button
-          type="button"
-          onClick={genState === "loading" ? undefined : handleGenerateScene}
-          disabled={genState === "loading"}
-          className="flex items-center gap-1.5 bg-white border border-slate-300 hover:border-blue-400 hover:bg-blue-50 text-slate-600 hover:text-blue-700 px-3 py-1.5 rounded-lg text-[10px] font-semibold shadow-sm transition-all disabled:opacity-60 disabled:cursor-not-allowed"
-        >
-          {genState === "loading" ? (
-            <>
-              <span className="w-3 h-3 border-2 border-blue-400 border-t-transparent rounded-full animate-spin flex-none" />
-              Generating…
-            </>
-          ) : (
-            <>
-              <span className="text-[11px]">✦</span>
-              Generate Corporate Scene
-            </>
+        <div className="flex items-center gap-1.5">
+          {hdSceneUrl && (
+            <button
+              type="button"
+              onClick={() => setShowModal(true)}
+              className="bg-white border border-slate-300 hover:border-blue-400 hover:bg-blue-50 text-slate-600 hover:text-blue-700 px-3 py-1.5 rounded-lg text-[10px] font-semibold shadow-sm transition-all"
+            >
+              Open Render
+            </button>
           )}
-        </button>
+          <button
+            type="button"
+            onClick={genState === "loading" ? undefined : handleGenerateScene}
+            disabled={genState === "loading"}
+            className="flex items-center gap-1.5 bg-white border border-slate-300 hover:border-blue-400 hover:bg-blue-50 text-slate-600 hover:text-blue-700 px-3 py-1.5 rounded-lg text-[10px] font-semibold shadow-sm transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            {genState === "loading" ? (
+              <>
+                <span className="flex-none w-3 h-3 border-2 border-blue-400 rounded-full border-t-transparent animate-spin" />
+                Generating...
+              </>
+            ) : (
+              <>
+                <span className="text-[11px]">✦</span>
+                Generate HD Render
+              </>
+            )}
+          </button>
+        </div>
       </div>
 
       {/* Generated image modal */}
-      {showModal && sceneImage && (
+      {showModal && hdSceneUrl && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
           onClick={() => setShowModal(false)}
         >
           <div
-            className="relative max-w-5xl w-full mx-4 bg-white rounded-2xl shadow-2xl overflow-hidden"
+            className="relative w-full max-w-5xl mx-4 overflow-hidden bg-white shadow-2xl rounded-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Modal header */}
             <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
               <div>
-                <div className="text-sm font-bold text-slate-800">Corporate Operations Diorama</div>
+                <div className="text-sm font-bold text-slate-800">HD 3D Isometric Office Map</div>
                 <div className="text-[9px] text-slate-400 mt-0.5">
-                  Generated by DALL-E 3 · {sceneImage.size} · {sceneImage.quality.toUpperCase()}
+                  {sceneImage
+                    ? `Generated by DALL-E 3 · ${sceneImage.size} · ${sceneImage.quality.toUpperCase()}`
+                    : "Configured HD render · static image source"}
                 </div>
               </div>
               <div className="flex items-center gap-2">
                 <a
-                  href={sceneImage.url}
-                  download="corporate-diorama.png"
+                  href={hdSceneUrl}
+                  download="nexus-office-map-hd.png"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-[10px] font-semibold text-blue-600 hover:text-blue-800 border border-blue-200 hover:border-blue-400 rounded px-2.5 py-1 transition-colors"
@@ -243,7 +339,7 @@ export function IsometricRoom({ agents, expEffects }: IsometricRoomProps) {
                 <button
                   type="button"
                   onClick={() => setShowModal(false)}
-                  className="w-7 h-7 flex items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700 text-lg transition-colors"
+                  className="flex items-center justify-center text-lg transition-colors rounded-full w-7 h-7 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
                 >
                   ×
                 </button>
@@ -252,13 +348,13 @@ export function IsometricRoom({ agents, expEffects }: IsometricRoomProps) {
 
             {/* Image */}
             <img
-              src={sceneImage.url}
-              alt="Corporate Operations Diorama"
+              src={hdSceneUrl}
+              alt="HD 3D Isometric Office Map"
               className="w-full object-contain max-h-[70vh]"
             />
 
             {/* Revised prompt */}
-            {sceneImage.revised_prompt && (
+            {sceneImage?.revised_prompt && (
               <div className="px-5 py-3 border-t border-slate-100 bg-slate-50">
                 <div className="text-[8px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
                   Refined Prompt (by DALL-E 3)
@@ -284,7 +380,7 @@ function AgentDetailCard({ agent, onClose }: { agent: AgentRuntimeState; onClose
   const [firstName, title] = agent.display_name.split(" / ");
 
   return (
-    <div className="absolute right-4 top-10 bottom-10 w-60 z-30 flex flex-col bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden">
+    <div className="absolute z-30 flex flex-col overflow-hidden bg-white border shadow-xl right-4 top-10 bottom-10 w-60 border-slate-200 rounded-xl">
 
       {/* Role-colored top stripe */}
       <div className={`h-1 w-full flex-none ${rs.stripe}`} />
@@ -298,7 +394,7 @@ function AgentDetailCard({ agent, onClose }: { agent: AgentRuntimeState; onClose
               {agent.role.replace(/_/g, " ")}
             </span>
           </div>
-          <div className="text-sm font-bold text-slate-800 leading-tight">{firstName}</div>
+          <div className="text-sm font-bold leading-tight text-slate-800">{firstName}</div>
           {title && <div className="text-[10px] text-slate-400 mt-0.5">{title}</div>}
         </div>
         <button
@@ -309,7 +405,7 @@ function AgentDetailCard({ agent, onClose }: { agent: AgentRuntimeState; onClose
       </div>
 
       {/* Body */}
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+      <div className="flex-1 px-4 py-3 space-y-3 overflow-y-auto">
 
         {/* Status badge */}
         <div className={`flex items-center gap-2 px-2.5 py-1.5 rounded-md border ${ss.badgeBg}`}>
