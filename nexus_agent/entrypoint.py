@@ -1276,3 +1276,75 @@ async def cancel_task(task_id: str, _: Principal = Depends(require_api_key)):
         f"[TASK:{task_id[:8]}] 🚫 Task ถูกยกเลิกโดยผู้ใช้", agent_id="system"
     )
     return {"status": "cancelled", "task_id": task_id}
+
+
+# ── Scene Image Generation ────────────────────────────────────────────────────
+
+class SceneGenerateRequest(BaseModel):
+    visual_style: str = (
+        "Highly detailed 3D isometric corporate diorama, premium technical visualization, "
+        "clean white studio background, realistic scale, global illumination, soft shadows, "
+        "subtle ambient occlusion, high-end consulting slide illustration."
+    )
+    scene_objects: str = (
+        "Realistic corporate office and industrial objects: desks, laptops, monitors, "
+        "server racks, glass boards, printed reports, paper documents, binders, "
+        "floating spreadsheet panels, dashboard screens, warning icons, workflow cards."
+    )
+    color_system: str = (
+        "Color palette: clean white, polished steel, soft grey, muted blue, "
+        "with strong red accents only for alerts, risks, and critical indicators."
+    )
+    negative_prompt: str = (
+        "No cartoon style, no pixel art, no game UI, no cyberpunk neon, "
+        "no dark background, no low-poly objects, no watermark, no blurry details."
+    )
+    size: str = "1792x1024"
+    quality: str = "hd"
+
+
+@app.post("/scene/generate", tags=["scene"])
+async def generate_scene(
+    request: SceneGenerateRequest,
+    _: Principal = Depends(require_api_key),
+):
+    """Generate a corporate diorama scene image via DALL-E 3.
+
+    Assembles the structured prompt components into a single DALL-E 3 prompt
+    and returns the generated image URL (valid for 1 hour from OpenAI CDN).
+    """
+    openai_key = settings.openai_api_key or os.environ.get("OPENAI_API_KEY", "")
+    if not openai_key:
+        raise HTTPException(
+            status_code=503,
+            detail="OPENAI_API_KEY is not configured. Set it in your environment to use scene generation.",
+        )
+
+    prompt = (
+        f"{request.visual_style.strip()}\n\n"
+        f"Scene contents: {request.scene_objects.strip()}\n\n"
+        f"{request.color_system.strip()}\n\n"
+        f"Important constraints — avoid entirely: {request.negative_prompt.strip()}"
+    )
+
+    try:
+        from openai import OpenAI as _OpenAI
+        client = _OpenAI(api_key=openai_key)
+        response = client.images.generate(
+            model="dall-e-3",
+            prompt=prompt,
+            size=request.size,          # type: ignore[arg-type]
+            quality=request.quality,    # type: ignore[arg-type]
+            n=1,
+        )
+        image_data = response.data[0]
+        return {
+            "url": image_data.url,
+            "revised_prompt": getattr(image_data, "revised_prompt", None),
+            "model": "dall-e-3",
+            "size": request.size,
+            "quality": request.quality,
+        }
+    except Exception as exc:
+        logger.error("scene_generate_failed: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Image generation failed: {exc}") from exc
