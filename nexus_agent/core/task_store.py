@@ -54,6 +54,33 @@ class TaskStore:
                     connected_at TEXT NOT NULL,
                     last_synced  TEXT NOT NULL
                 );
+
+                -- Social media platform connections
+                -- access_token is stored encrypted-at-rest via app-level AES when available,
+                -- otherwise stored as plain text (sufficient for self-hosted single-tenant use).
+                CREATE TABLE IF NOT EXISTS social_connections (
+                    platform         TEXT PRIMARY KEY,
+                    account_name     TEXT NOT NULL DEFAULT '',
+                    account_id       TEXT NOT NULL DEFAULT '',
+                    page_id          TEXT,
+                    access_token     TEXT NOT NULL,
+                    token_expires_at TEXT,
+                    connected_at     TEXT NOT NULL,
+                    extra            TEXT DEFAULT '{}'
+                );
+
+                -- History of social media posts made from the Content Creator
+                CREATE TABLE IF NOT EXISTS social_posts (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    platform        TEXT NOT NULL,
+                    content_snippet TEXT NOT NULL,
+                    api_post_id     TEXT,
+                    post_url        TEXT,
+                    status          TEXT NOT NULL DEFAULT 'pending',
+                    posted_at       TEXT,
+                    error           TEXT,
+                    created_at      TEXT NOT NULL
+                );
             """)
 
     def _conn(self) -> sqlite3.Connection:
@@ -166,6 +193,120 @@ class TaskStore:
                 "DELETE FROM connected_repos WHERE repo_id = ?", (repo_id,)
             )
         return result.rowcount > 0
+
+    # ── Social Connections ────────────────────────────────────────────────────
+
+    def upsert_social_connection(
+        self,
+        platform: str,
+        account_name: str,
+        account_id: str,
+        access_token: str,
+        page_id: str | None = None,
+        token_expires_at: str | None = None,
+        extra: dict | None = None,
+    ) -> Dict[str, Any]:
+        now = datetime.now(timezone.utc).isoformat()
+        row = {
+            "platform":         platform,
+            "account_name":     account_name,
+            "account_id":       account_id,
+            "page_id":          page_id,
+            "access_token":     access_token,
+            "token_expires_at": token_expires_at,
+            "connected_at":     now,
+            "extra":            json.dumps(extra or {}),
+        }
+        with self._conn() as conn:
+            conn.execute(
+                """INSERT INTO social_connections
+                   (platform, account_name, account_id, page_id, access_token,
+                    token_expires_at, connected_at, extra)
+                   VALUES (:platform, :account_name, :account_id, :page_id, :access_token,
+                           :token_expires_at, :connected_at, :extra)
+                   ON CONFLICT(platform) DO UPDATE SET
+                       account_name     = excluded.account_name,
+                       account_id       = excluded.account_id,
+                       page_id          = excluded.page_id,
+                       access_token     = excluded.access_token,
+                       token_expires_at = excluded.token_expires_at,
+                       connected_at     = excluded.connected_at,
+                       extra            = excluded.extra""",
+                row,
+            )
+        return row
+
+    def get_social_connection(self, platform: str) -> Optional[Dict[str, Any]]:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM social_connections WHERE platform = ?", (platform,)
+            ).fetchone()
+        if row is None:
+            return None
+        d = dict(row)
+        try:
+            d["extra"] = json.loads(d.get("extra") or "{}")
+        except Exception:
+            d["extra"] = {}
+        return d
+
+    def list_social_connections(self) -> List[Dict[str, Any]]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT platform, account_name, account_id, page_id, token_expires_at, connected_at "
+                "FROM social_connections ORDER BY connected_at DESC"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def delete_social_connection(self, platform: str) -> bool:
+        with self._conn() as conn:
+            result = conn.execute(
+                "DELETE FROM social_connections WHERE platform = ?", (platform,)
+            )
+        return result.rowcount > 0
+
+    # ── Social Posts Log ──────────────────────────────────────────────────────
+
+    def log_social_post(
+        self,
+        platform: str,
+        content_snippet: str,
+        status: str = "pending",
+        api_post_id: str | None = None,
+        post_url: str | None = None,
+        error: str | None = None,
+    ) -> int:
+        now = datetime.now(timezone.utc).isoformat()
+        posted_at = now if status == "published" else None
+        with self._conn() as conn:
+            cur = conn.execute(
+                """INSERT INTO social_posts
+                   (platform, content_snippet, api_post_id, post_url, status, posted_at, error, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (platform, content_snippet[:280], api_post_id, post_url, status, posted_at, error, now),
+            )
+        return cur.lastrowid or 0
+
+    def update_social_post(self, post_id: int, **fields: Any) -> None:
+        if not fields:
+            return
+        set_clause = ", ".join(f"{k} = ?" for k in fields)
+        values = list(fields.values()) + [post_id]
+        with self._conn() as conn:
+            conn.execute(f"UPDATE social_posts SET {set_clause} WHERE id = ?", values)
+
+    def list_social_posts(self, platform: str | None = None, limit: int = 50) -> List[Dict[str, Any]]:
+        with self._conn() as conn:
+            if platform:
+                rows = conn.execute(
+                    "SELECT * FROM social_posts WHERE platform = ? ORDER BY created_at DESC LIMIT ?",
+                    (platform, limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM social_posts ORDER BY created_at DESC LIMIT ?", (limit,)
+                ).fetchall()
+        return [dict(r) for r in rows]
 
 
 # Module-level singleton
