@@ -1338,3 +1338,269 @@ async def generate_scene(
     except Exception as exc:
         logger.error("scene_generate_failed: %s", exc)
         raise HTTPException(status_code=500, detail=f"Image generation failed: {exc}") from exc
+
+
+# ── Social Media Integration ──────────────────────────────────────────────────
+
+class SocialConnectRequest(BaseModel):
+    platform: str                  # "facebook" | "tiktok"
+    access_token: str
+    page_id: str | None = None     # Facebook Page ID (required for Facebook)
+    account_name: str = ""
+    account_id: str = ""
+
+
+class SocialPostRequest(BaseModel):
+    platform: str                  # "facebook" | "tiktok"
+    message: str
+    link: str | None = None        # Optional URL to attach (Facebook)
+    image_url: str | None = None   # Optional image URL (Facebook photo post)
+    video_url: str | None = None   # Optional MP4 URL (TikTok video post)
+
+
+class TikTokOAuthRequest(BaseModel):
+    redirect_uri: str
+
+
+@app.post("/social/connect", tags=["social"])
+async def social_connect(
+    request: SocialConnectRequest,
+    _: Principal = Depends(require_api_key),
+):
+    """Save social media credentials and verify they work.
+
+    For Facebook: provide ``page_id`` + a Page Access Token.
+    For TikTok: provide the user ``access_token`` from the OAuth callback.
+    """
+    from nexus_agent.tools.social_media import (
+        facebook_verify_token,
+        tiktok_get_user_info,
+    )
+
+    platform = request.platform.lower()
+
+    try:
+        if platform == "facebook":
+            if not request.page_id:
+                raise HTTPException(status_code=400, detail="page_id is required for Facebook")
+            info = await facebook_verify_token(request.page_id, request.access_token)
+            task_store.upsert_social_connection(
+                platform="facebook",
+                account_name=info.get("name", request.account_name),
+                account_id=info.get("id", request.account_id),
+                access_token=request.access_token,
+                page_id=request.page_id,
+                extra={"fan_count": info.get("fan_count", 0)},
+            )
+            return {
+                "status": "connected",
+                "platform": "facebook",
+                "page_name": info.get("name"),
+                "page_id": info.get("id"),
+                "fan_count": info.get("fan_count", 0),
+            }
+
+        elif platform == "tiktok":
+            info = await tiktok_get_user_info(request.access_token)
+            task_store.upsert_social_connection(
+                platform="tiktok",
+                account_name=info.get("display_name", request.account_name),
+                account_id=info.get("open_id", request.account_id),
+                access_token=request.access_token,
+                extra={"follower_count": info.get("follower_count", 0), "avatar_url": info.get("avatar_url", "")},
+            )
+            return {
+                "status": "connected",
+                "platform": "tiktok",
+                "display_name": info.get("display_name"),
+                "open_id": info.get("open_id"),
+                "follower_count": info.get("follower_count", 0),
+            }
+
+        else:
+            raise HTTPException(status_code=400, detail=f"Unsupported platform: {platform!r}")
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("social_connect_failed platform=%s: %s", platform, exc)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/social/connections", tags=["social"])
+async def list_social_connections(_: Principal = Depends(require_api_key)):
+    """Return all connected social media accounts (tokens NOT included in response)."""
+    return {"connections": task_store.list_social_connections()}
+
+
+@app.delete("/social/{platform}", tags=["social"])
+async def disconnect_social(platform: str, _: Principal = Depends(require_api_key)):
+    """Remove a social media connection."""
+    deleted = task_store.delete_social_connection(platform.lower())
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"No connection found for platform: {platform}")
+    return {"status": "disconnected", "platform": platform}
+
+
+@app.post("/social/post", tags=["social"])
+async def social_post(
+    request: SocialPostRequest,
+    _: Principal = Depends(require_api_key),
+):
+    """Publish content to a connected social media platform.
+
+    The saved access token is used automatically — no need to pass it again.
+    """
+    from nexus_agent.tools.social_media import (
+        facebook_post_text,
+        facebook_post_photo,
+        tiktok_post_video,
+    )
+
+    platform = request.platform.lower()
+    conn = task_store.get_social_connection(platform)
+    if not conn:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Platform '{platform}' is not connected. Connect it first via POST /social/connect.",
+        )
+
+    log_id = task_store.log_social_post(
+        platform=platform,
+        content_snippet=request.message[:280],
+        status="pending",
+    )
+
+    try:
+        result: dict
+
+        if platform == "facebook":
+            page_id = conn.get("page_id") or ""
+            if not page_id:
+                raise RuntimeError("Facebook page_id is missing in the saved connection.")
+            token = conn["access_token"]
+
+            if request.image_url:
+                result = await facebook_post_photo(
+                    page_id=page_id, access_token=token,
+                    message=request.message, image_url=request.image_url,
+                )
+            else:
+                result = await facebook_post_text(
+                    page_id=page_id, access_token=token,
+                    message=request.message, link=request.link,
+                )
+
+        elif platform == "tiktok":
+            if not request.video_url:
+                raise HTTPException(
+                    status_code=400,
+                    detail="TikTok requires video_url. Attach an MP4 URL to post a video.",
+                )
+            result = await tiktok_post_video(
+                access_token=conn["access_token"],
+                video_url=request.video_url,
+                caption=request.message,
+            )
+
+        else:
+            raise HTTPException(status_code=400, detail=f"Unsupported platform: {platform!r}")
+
+        task_store.update_social_post(
+            log_id,
+            status="published",
+            api_post_id=str(result.get("post_id") or result.get("publish_id") or ""),
+            post_url=result.get("url", ""),
+            posted_at=datetime.now(timezone.utc).isoformat(),
+        )
+        return {**result, "log_id": log_id}
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("social_post_failed platform=%s: %s", platform, exc)
+        task_store.update_social_post(log_id, status="failed", error=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/social/posts", tags=["social"])
+async def list_social_posts(
+    platform: str | None = None,
+    limit: int = 50,
+    _: Principal = Depends(require_api_key),
+):
+    """Return recent social media post history."""
+    return {"posts": task_store.list_social_posts(platform=platform, limit=limit)}
+
+
+@app.get("/social/tiktok/oauth-url", tags=["social"])
+async def tiktok_oauth_url(
+    redirect_uri: str,
+    _: Principal = Depends(require_api_key),
+):
+    """Return the TikTok OAuth2 authorization URL for the connected app.
+
+    The frontend should redirect the user to this URL to grant permissions.
+    After approval, TikTok redirects to ``redirect_uri?code=<code>``.
+    Call ``POST /social/tiktok/exchange-code`` with that code.
+    """
+    from nexus_agent.tools.social_media import tiktok_build_auth_url
+
+    client_key = settings.openai_api_key  # reuse settings pattern
+    tt_key = os.environ.get("TIKTOK_CLIENT_KEY", "")
+    if not tt_key:
+        raise HTTPException(
+            status_code=503,
+            detail="TIKTOK_CLIENT_KEY is not configured. Set it in your environment.",
+        )
+    url = tiktok_build_auth_url(client_key=tt_key, redirect_uri=redirect_uri)
+    return {"auth_url": url}
+
+
+@app.post("/social/tiktok/exchange-code", tags=["social"])
+async def tiktok_exchange_code(
+    code: str,
+    redirect_uri: str,
+    _: Principal = Depends(require_api_key),
+):
+    """Exchange a TikTok authorization code for an access token and save the connection."""
+    from nexus_agent.tools.social_media import tiktok_exchange_code as _exchange, tiktok_get_user_info
+
+    tt_key    = os.environ.get("TIKTOK_CLIENT_KEY", "")
+    tt_secret = os.environ.get("TIKTOK_CLIENT_SECRET", "")
+    if not tt_key or not tt_secret:
+        raise HTTPException(status_code=503, detail="TikTok app credentials not configured.")
+
+    try:
+        token_data = await _exchange(
+            client_key=tt_key, client_secret=tt_secret,
+            code=code, redirect_uri=redirect_uri,
+        )
+        access_token  = token_data.get("access_token", "")
+        refresh_token = token_data.get("refresh_token", "")
+        expires_in    = token_data.get("expires_in", 0)
+
+        info = await tiktok_get_user_info(access_token)
+        task_store.upsert_social_connection(
+            platform="tiktok",
+            account_name=info.get("display_name", ""),
+            account_id=info.get("open_id", ""),
+            access_token=access_token,
+            extra={
+                "refresh_token": refresh_token,
+                "expires_in": expires_in,
+                "follower_count": info.get("follower_count", 0),
+                "avatar_url": info.get("avatar_url", ""),
+            },
+        )
+        return {
+            "status": "connected",
+            "platform": "tiktok",
+            "display_name": info.get("display_name"),
+            "follower_count": info.get("follower_count", 0),
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("tiktok_exchange_code_failed: %s", exc)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
