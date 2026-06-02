@@ -26,7 +26,7 @@ psycopg[binary]>=3.1
 redis>=5.0
 
 # ── Observability ───────────────────────────────────────────────────────────
-prometheus-client>=0.20.0
+prometheus-client>=0.25.0
 sentry-sdk[fastapi]>=2.7.0
 
 # ── Optional multi-provider LLM clients (install only if you use the provider) ──
