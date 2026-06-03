@@ -1,8 +1,8 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useCallback } from "react";
 import {
   Activity, Cpu, Wifi, WifiOff, LayoutGrid, Box, Sliders,
   Search, Briefcase, LogOut, DollarSign, Tag, MessageSquare,
-  Database, Settings, ChevronDown, ChevronRight,
+  Database, Settings, ChevronDown, ChevronRight, Zap,
 } from "lucide-react";
 import { useAgentSocket } from "../hooks/useAgentSocket";
 import { useAuth } from "../auth";
@@ -19,6 +19,7 @@ import { TaskTemplates }         from "./TaskTemplates";
 import { ChatPanel }             from "./ChatPanel";
 import { KnowledgeBasePanel }    from "./KnowledgeBasePanel";
 import { AdminPanel }            from "./AdminPanel";
+import { LiveTaskProgress }      from "./LiveTaskProgress";
 import { ErrorBoundary }         from "./ErrorBoundary";
 
 type ViewMode =
@@ -71,6 +72,8 @@ export default function Dashboard() {
   const { agents, connected, expEffects, logs } = useAgentSocket();
   const [viewMode, setViewMode] = useState<ViewMode>("isometric");
   const [navExpanded, setNavExpanded] = useState<Record<string,boolean>>({ Office: true, Agents: true, System: true });
+  const [liveTaskId,   setLiveTaskId]   = useState<string | null>(null);
+  const [liveTaskGoal, setLiveTaskGoal] = useState("");
 
   const cells = useMemo(() => ORDER.map(id => agents[id]).filter(Boolean), [agents]);
 
@@ -95,8 +98,18 @@ export default function Dashboard() {
       const err = await res.json().catch(() => ({}));
       throw new Error((err as any).detail || `HTTP ${res.status}`);
     }
-    return res.json();
+    const data = await res.json();
+    // Auto-open live task monitor
+    if (data.task_id) {
+      setLiveTaskId(data.task_id);
+      setLiveTaskGoal(goal);
+    }
+    return data;
   };
+
+  const openLiveTask = useCallback((taskId: string, goal = "") => {
+    setLiveTaskId(taskId); setLiveTaskGoal(goal);
+  }, []);
 
   // Full-width views (no sidebar)
   const isFullWidth = viewMode === "chat" || viewMode === "knowledge-base" || viewMode === "admin";
@@ -225,7 +238,11 @@ export default function Dashboard() {
 
             {/* Right sidebar */}
             <aside className="w-full h-72 lg:h-auto lg:w-72 flex-none order-3">
-              <LiveLogViewer logs={logs} />
+              <LiveLogViewer
+                logs={logs}
+                activeTaskId={liveTaskId}
+                onOpenTask={(tid) => openLiveTask(tid)}
+              />
             </aside>
           </main>
         )}
@@ -237,6 +254,19 @@ export default function Dashboard() {
           </footer>
         )}
       </div>
+
+      {/* ── Floating Live Task Monitor ────────────────────────────────────────── */}
+      {liveTaskId && (
+        <div className="fixed right-6 bottom-20 z-40 w-[420px] h-[520px] shadow-2xl animate-in slide-in-from-right-4 fade-in duration-300">
+          <ErrorBoundary>
+            <LiveTaskProgress
+              taskId={liveTaskId}
+              taskGoal={liveTaskGoal}
+              onClose={() => setLiveTaskId(null)}
+            />
+          </ErrorBoundary>
+        </div>
+      )}
     </div>
   );
 }

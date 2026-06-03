@@ -128,6 +128,47 @@ export function WorkspacePanel({ agents = {} }: WorkspacePanelProps) {
     } catch (e: any) { if (e?.name !== "AbortError") console.error(e); }
   };
 
+  const handleDeleteTask = async (taskId: string) => {
+    if (!confirm("ลบ task นี้ออกจากประวัติ?")) return;
+    try {
+      const res = await fetch(getApiUrl(`/tasks/${taskId}`), {
+        method: "DELETE",
+        headers: getHeaders(),
+      });
+      if (res.ok) await fetchTasks();
+      else showMsg("ลบ task ไม่สำเร็จ", "error");
+    } catch (e: any) { showMsg(e.message, "error"); }
+  };
+
+  const handleClearDuplicates = async () => {
+    if (!confirm("ลบ tasks ที่ซ้ำกัน (เก็บเฉพาะล่าสุดของแต่ละ goal)?")) return;
+    try {
+      const res = await fetch(getApiUrl("/tasks?deduplicate=true"), {
+        method: "DELETE",
+        headers: getHeaders(),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        showMsg(`ลบ tasks ที่ซ้ำกัน ${data.deleted} รายการ`, "success");
+        await fetchTasks();
+      } else showMsg("ล้างข้อมูลไม่สำเร็จ", "error");
+    } catch (e: any) { showMsg(e.message, "error"); }
+  };
+
+  const handleClearAllTasks = async () => {
+    if (!confirm("ลบ Task History ทั้งหมด? ไม่สามารถกู้คืนได้")) return;
+    try {
+      const res = await fetch(getApiUrl("/tasks?clear_all=true"), {
+        method: "DELETE",
+        headers: getHeaders(),
+      });
+      if (res.ok) {
+        showMsg("ล้าง Task History ทั้งหมดแล้ว", "success");
+        await fetchTasks();
+      } else showMsg("ล้างข้อมูลไม่สำเร็จ", "error");
+    } catch (e: any) { showMsg(e.message, "error"); }
+  };
+
   const handleActivateRepo = async (repoId: string) => {
     setLoading(true);
     try {
@@ -1116,19 +1157,46 @@ export function WorkspacePanel({ agents = {} }: WorkspacePanelProps) {
         {/* 5. TASK HISTORY PANEL */}
         {activeTab === "tasks" && (
           <div className="h-full flex flex-col gap-3 overflow-hidden">
-            <div className="flex items-center justify-between flex-none">
+            <div className="flex items-center justify-between flex-none flex-wrap gap-2">
               <h3 className="text-sm font-bold uppercase tracking-wider text-cyber-neon/80 font-mono">
                 Task History ({taskRuns.length})
               </h3>
-              <button
-                type="button"
-                aria-label="Refresh task list"
-                title="Refresh task list"
-                onClick={() => fetchTasks()}
-                className="p-1 text-slate-500 hover:text-cyber-neon transition-colors"
-              >
-                <RefreshCw aria-hidden="true" className="w-3.5 h-3.5" />
-              </button>
+              <div className="flex items-center gap-1.5">
+                {/* Clear Duplicates */}
+                {taskRuns.length > 1 && (
+                  <button
+                    type="button"
+                    title="Remove duplicate tasks (keep newest per goal)"
+                    onClick={handleClearDuplicates}
+                    className="flex items-center gap-1 px-2 py-1 text-[9px] font-mono border border-cyber-neon/30 text-cyber-neon/70 hover:text-cyber-neon hover:bg-cyber-neon/10 rounded transition-all"
+                  >
+                    <Zap aria-hidden="true" className="w-3 h-3" />
+                    Clear Duplicates
+                  </button>
+                )}
+                {/* Clear All */}
+                {taskRuns.length > 0 && (
+                  <button
+                    type="button"
+                    title="Delete all task history"
+                    onClick={handleClearAllTasks}
+                    className="flex items-center gap-1 px-2 py-1 text-[9px] font-mono border border-status-error/30 text-status-error/60 hover:text-status-error hover:bg-status-error/10 rounded transition-all"
+                  >
+                    <Trash2 aria-hidden="true" className="w-3 h-3" />
+                    Clear All
+                  </button>
+                )}
+                {/* Refresh */}
+                <button
+                  type="button"
+                  aria-label="Refresh task list"
+                  title="Refresh task list"
+                  onClick={() => fetchTasks()}
+                  className="p-1 text-slate-500 hover:text-cyber-neon transition-colors"
+                >
+                  <RefreshCw aria-hidden="true" className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
 
             {/* Agent Activity Monitor */}
@@ -1194,23 +1262,35 @@ export function WorkspacePanel({ agents = {} }: WorkspacePanelProps) {
                   return (
                     <div
                       key={task.task_id}
-                      className={`rounded-lg border font-mono text-[10px] ${statusColor} overflow-hidden`}
+                      className={`rounded-lg border font-mono text-[10px] ${statusColor} overflow-hidden group`}
                     >
-                      <button
-                        type="button"
-                        onClick={() => setExpandedTask(isExpanded ? null : task.task_id)}
-                        className="w-full flex items-start gap-2 px-3 py-2 text-left hover:bg-white/5 transition-colors"
-                      >
-                        <span className="flex-none mt-0.5">{statusIcon}</span>
-                        <span className="flex-1 min-w-0 truncate">{task.goal}</span>
-                        <span className="flex-none opacity-50 text-[9px]">
-                          {task.task_id.slice(0, 8)}
-                        </span>
-                        {isExpanded
-                          ? <ChevronDown className="w-3 h-3 flex-none opacity-60" />
-                          : <ChevronRight className="w-3 h-3 flex-none opacity-60" />
-                        }
-                      </button>
+                      <div className="flex items-start">
+                        <button
+                          type="button"
+                          onClick={() => setExpandedTask(isExpanded ? null : task.task_id)}
+                          className="flex-1 flex items-start gap-2 px-3 py-2 text-left hover:bg-white/5 transition-colors min-w-0"
+                        >
+                          <span className="flex-none mt-0.5">{statusIcon}</span>
+                          <span className="flex-1 min-w-0 truncate">{task.goal}</span>
+                          <span className="flex-none opacity-50 text-[9px]">
+                            {task.task_id.slice(0, 8)}
+                          </span>
+                          {isExpanded
+                            ? <ChevronDown className="w-3 h-3 flex-none opacity-60" />
+                            : <ChevronRight className="w-3 h-3 flex-none opacity-60" />
+                          }
+                        </button>
+                        {/* Delete task button */}
+                        <button
+                          type="button"
+                          aria-label="Delete task"
+                          title="Delete this task"
+                          onClick={(e) => { e.stopPropagation(); handleDeleteTask(task.task_id); }}
+                          className="flex-none p-2 opacity-0 group-hover:opacity-100 text-slate-600 hover:text-status-error transition-all"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
 
                       {isExpanded && (
                         <div className="px-3 pb-3 space-y-1.5 border-t border-current/10">
