@@ -20,7 +20,9 @@ import { ChatPanel }             from "./ChatPanel";
 import { KnowledgeBasePanel }    from "./KnowledgeBasePanel";
 import { AdminPanel }            from "./AdminPanel";
 import { LiveTaskProgress }      from "./LiveTaskProgress";
-import { ErrorBoundary }         from "./ErrorBoundary";
+import { NotificationCenter }   from "./NotificationCenter";
+import { ParticleBackground }   from "./ParticleBackground";
+import { ErrorBoundary }        from "./ErrorBoundary";
 
 type ViewMode =
   | "isometric" | "grid" | "workspace" | "agentspace"
@@ -115,10 +117,15 @@ export default function Dashboard() {
   const isFullWidth = viewMode === "chat" || viewMode === "knowledge-base" || viewMode === "admin";
 
   return (
-    <div className="flex h-screen overflow-hidden bg-cyber-bg text-slate-300">
+    <div className="flex h-screen overflow-hidden bg-cyber-bg text-slate-300 relative">
+
+      {/* ── Particle background (full-screen, behind everything) ──── */}
+      <div className="absolute inset-0 pointer-events-none z-0 overflow-hidden">
+        <ParticleBackground mode="neural" count={45} opacity={0.35} speed={0.25} interactive={false} />
+      </div>
 
       {/* ── Left Nav (collapsible sidebar) ─────────────────────────────── */}
-      <nav className="flex-none w-48 flex flex-col border-r border-cyber-neon/20 bg-cyber-bg/90 overflow-y-auto">
+      <nav className="relative z-10 flex-none w-48 flex flex-col border-r border-cyber-neon/20 bg-cyber-bg/90 overflow-y-auto">
         {/* Logo */}
         <div className="flex items-center gap-2 px-3 py-4 border-b border-cyber-neon/15">
           <Activity className="h-5 w-5 text-cyber-gold shrink-0" />
@@ -155,7 +162,7 @@ export default function Dashboard() {
           ))}
         </div>
 
-        {/* Stats & Logout */}
+        {/* Stats, Notifications & Logout */}
         <div className="border-t border-cyber-neon/15 p-3 space-y-1.5">
           <div className="flex items-center gap-1.5 text-[9px] font-mono text-slate-500">
             <Cpu className="w-3 h-3 text-status-processing" />
@@ -166,16 +173,20 @@ export default function Dashboard() {
             {connected ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
             {connected ? "LIVE" : "OFFLINE"}
           </div>
-          <button type="button" title="Logout"
-            onClick={() => { if (confirm("ออกจากระบบ?")) setApiKey(null); }}
-            className="flex items-center gap-1.5 text-[9px] font-mono text-slate-500 hover:text-status-error transition-colors mt-1">
-            <LogOut className="w-3.5 h-3.5" /> Logout
-          </button>
+          {/* Notification bell */}
+          <div className="flex items-center justify-between mt-1">
+            <button type="button" title="Logout"
+              onClick={() => { if (confirm("ออกจากระบบ?")) setApiKey(null); }}
+              className="flex items-center gap-1.5 text-[9px] font-mono text-slate-500 hover:text-status-error transition-colors">
+              <LogOut className="w-3.5 h-3.5" /> Logout
+            </button>
+            <NotificationCenter />
+          </div>
         </div>
       </nav>
 
       {/* ── Main content ─────────────────────────────────────────────────── */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="relative z-10 flex-1 flex flex-col overflow-hidden">
 
         {/* Full-width views */}
         {isFullWidth && (

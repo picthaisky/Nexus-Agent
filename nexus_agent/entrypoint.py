@@ -100,6 +100,11 @@ async def lifespan(app: FastAPI):
     # Bind per-task event hub to the same event loop
     from nexus_agent.core.task_event_hub import task_event_hub as _teh
     _teh.set_loop(_loop)
+    # Bind presence + notification hubs
+    from nexus_agent.core.presence_hub     import presence_hub     as _ph
+    from nexus_agent.core.notification_store import notification_store as _ns
+    _ph.set_loop(_loop)
+    _ns.set_loop(_loop)
     try:
         from nexus_agent.core.scheduler import start_scheduler
         start_scheduler()
@@ -395,6 +400,19 @@ class ChatSessionCreate(BaseModel):
 class ChatMessageRequest(BaseModel):
     content: str
     stream: bool = False
+
+
+class PresenceStatusUpdate(BaseModel):
+    session_id: str
+    status:     str = ""   # online | away | busy
+    activity:   str = ""
+
+
+class NotificationCreate(BaseModel):
+    category:   str = "info"
+    title:      str
+    body:       str = ""
+    action_url: str | None = None
 
 
 class ConnectRepoRequest(BaseModel):
@@ -1662,6 +1680,11 @@ def _run_orchestrator(goal: str, task_id: str) -> None:
         # Reset all agents to IDLE
         _emit_all_agents(_AMS.COMPLETED, "Task completed ✅")
         _teh.task_complete(task_id, "All steps completed successfully")
+        # Push in-app notification
+        try:
+            from nexus_agent.core.notification_store import notification_store as _notif
+            _notif.notify_task_done(task_id, goal)
+        except Exception: pass
         # Send completion notification (email / LINE) — non-blocking
         try:
             import asyncio as _aio
@@ -1689,6 +1712,10 @@ def _run_orchestrator(goal: str, task_id: str) -> None:
         # Reset all agents to ERROR then IDLE
         _emit_all_agents(_AMS.ERROR, f"Task failed: {short_err[:60]}")
         _teh.task_failed(task_id, str(exc))
+        try:
+            from nexus_agent.core.notification_store import notification_store as _notif2
+            _notif2.notify_task_failed(task_id, goal, str(exc)[:120])
+        except Exception: pass
         # Send failure notification
         try:
             import asyncio as _aio2
@@ -2495,3 +2522,128 @@ async def test_model_provider(provider: str, _: Principal = Depends(require_api_
                 "tokens_in": resp.tokens_in, "tokens_out": resp.tokens_out}
     except Exception as exc:
         return {"ok": False, "provider": provider, "error": str(exc)}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PRESENCE + NOTIFICATIONS
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── Presence WebSocket ────────────────────────────────────────────────────────
+
+@app.websocket("/ws/presence")
+async def ws_presence(websocket: WebSocket, name: str = ""):
+    """Real-time presence channel.
+
+    On connect: broadcasts ``user_joined`` and sends ``snapshot``.
+    On disconnect: broadcasts ``user_left``.
+    Clients can send ``{"type":"status","status":"away","activity":"..."}``
+    to update their presence.
+    """
+    from nexus_agent.core.presence_hub import presence_hub as _pres
+    session_id = await _pres.connect(websocket, name=name)
+    try:
+        while True:
+            raw = await websocket.receive_text()
+            try:
+                msg = json.loads(raw)
+                if msg.get("type") == "status":
+                    await _pres.update_status(
+                        session_id,
+                        status=msg.get("status", ""),
+                        activity=msg.get("activity", ""),
+                    )
+                elif msg.get("type") == "ping":
+                    await websocket.send_text('{"type":"pong"}')
+            except Exception:
+                pass
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
+    finally:
+        await _pres.disconnect(session_id)
+
+
+@app.get("/presence", tags=["presence"])
+async def get_presence(_: Principal = Depends(require_api_key)):
+    """Return all online users."""
+    from nexus_agent.core.presence_hub import presence_hub as _pres
+    return {"users": _pres.get_users(), "count": _pres.online_count()}
+
+
+# ── Notification WebSocket ────────────────────────────────────────────────────
+
+@app.websocket("/ws/notifications")
+async def ws_notifications(websocket: WebSocket):
+    """Real-time notification push channel.
+
+    Replays unread notifications on connect, then streams new ones as they arrive.
+    Clients can send ``{"type":"read","id":"..."}`` to mark items as read.
+    """
+    from nexus_agent.core.notification_store import notification_store as _nstore
+    await websocket.accept()
+    await _nstore.subscribe(websocket)
+    try:
+        while True:
+            raw = await websocket.receive_text()
+            try:
+                msg = json.loads(raw)
+                if msg.get("type") == "read":
+                    _nstore.mark_read(msg.get("id", ""))
+                elif msg.get("type") == "read_all":
+                    _nstore.mark_all_read()
+                elif msg.get("type") == "ping":
+                    await websocket.send_text('{"type":"pong"}')
+            except Exception:
+                pass
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
+    finally:
+        await _nstore.unsubscribe(websocket)
+
+
+# ── Notification REST API ─────────────────────────────────────────────────────
+
+@app.get("/notifications", tags=["notifications"])
+async def list_notifications(
+    limit: int = 50,
+    unread_only: bool = False,
+    _: Principal = Depends(require_api_key),
+):
+    from nexus_agent.core.notification_store import notification_store as _ns
+    return {
+        "notifications": _ns.list(limit=limit, unread_only=unread_only),
+        "unread_count":  _ns.unread_count(),
+    }
+
+@app.post("/notifications", tags=["notifications"])
+async def create_notification(request: NotificationCreate, _: Principal = Depends(require_api_key)):
+    from nexus_agent.core.notification_store import notification_store as _ns
+    return _ns.create(request.category, request.title, request.body, request.action_url)
+
+@app.post("/notifications/{notification_id}/read", tags=["notifications"])
+async def mark_notification_read(notification_id: str, _: Principal = Depends(require_api_key)):
+    from nexus_agent.core.notification_store import notification_store as _ns
+    if not _ns.mark_read(notification_id):
+        raise HTTPException(status_code=404, detail="Notification not found")
+    return {"status": "read", "id": notification_id}
+
+@app.post("/notifications/read-all", tags=["notifications"])
+async def mark_all_notifications_read(_: Principal = Depends(require_api_key)):
+    from nexus_agent.core.notification_store import notification_store as _ns
+    count = _ns.mark_all_read()
+    return {"status": "ok", "marked": count}
+
+@app.delete("/notifications/{notification_id}", tags=["notifications"])
+async def delete_notification(notification_id: str, _: Principal = Depends(require_api_key)):
+    from nexus_agent.core.notification_store import notification_store as _ns
+    if not _ns.delete(notification_id):
+        raise HTTPException(status_code=404, detail="Notification not found")
+    return {"status": "deleted"}
+
+@app.get("/notifications/unread-count", tags=["notifications"])
+async def unread_notification_count(_: Principal = Depends(require_api_key)):
+    from nexus_agent.core.notification_store import notification_store as _ns
+    return {"count": _ns.unread_count()}
