@@ -100,6 +100,67 @@ def _resolve_cwd_and_command(command: str) -> tuple[str, str]:
     return _DEFAULT_CWD, stripped
 
 
+def _stream_command(
+    args: list[str],
+    cwd: str,
+    task_id: str | None = None,
+    command_hint: str = "",
+) -> str:
+    """Run a command, streaming each line to the task event hub in real-time.
+
+    Returns the full combined output string.
+    """
+    from nexus_agent.core.task_event_hub import task_event_hub as _teh
+    import subprocess, select, sys
+
+    lines: list[str] = []
+    try:
+        proc = subprocess.Popen(
+            args,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            cwd=cwd,
+            env={**os.environ},
+            bufsize=1,
+        )
+
+        def _read_stream(stream, label: str) -> list[str]:
+            result: list[str] = []
+            if stream is None:
+                return result
+            for line in iter(stream.readline, ""):
+                stripped = line.rstrip("\n")
+                result.append(stripped)
+                lines.append(stripped)
+                if task_id:
+                    _teh.execution_line(task_id, stripped, label, command_hint)
+            return result
+
+        import threading
+        stdout_lines: list[str] = []
+        stderr_lines: list[str] = []
+
+        t_out = threading.Thread(target=lambda: stdout_lines.extend(_read_stream(proc.stdout, "stdout")))
+        t_err = threading.Thread(target=lambda: stderr_lines.extend(_read_stream(proc.stderr, "stderr")))
+        t_out.start(); t_err.start()
+
+        proc.wait(timeout=_DEFAULT_TIMEOUT)
+        t_out.join(); t_err.join()
+
+        output = "\n".join(lines).strip() or "(no output)"
+        if proc.returncode != 0:
+            output = f"[exit {proc.returncode}] (cwd: {cwd})\n{output}"
+        return output
+
+    except subprocess.TimeoutExpired:
+        try: proc.kill()
+        except Exception: pass
+        return f"Error: Command timed out after {_DEFAULT_TIMEOUT}s — '{command_hint[:80]}'"
+    except Exception as exc:
+        return f"Error executing command: {exc}"
+
+
 @tool
 def execute_cli_command(command: str) -> str:
     """Execute a sandboxed CLI command and return its combined stdout + stderr.
@@ -130,24 +191,15 @@ def execute_cli_command(command: str) -> str:
             f"Working directory: {cwd}"
         )
 
+    # Retrieve the current task_id from the thread-local context if available
     try:
-        result = subprocess.run(
-            args,
-            shell=False,
-            capture_output=True,
-            text=True,
-            timeout=_DEFAULT_TIMEOUT,
-            cwd=cwd,
-            env={**os.environ},   # inherit PATH, NEXUS_DATA_DIR, etc.
-        )
-        output = result.stdout
-        if result.stderr:
-            output += ("\n" if output else "") + result.stderr
-        if result.returncode != 0:
-            output = f"[exit {result.returncode}] (cwd: {cwd})\n{output}"
-        return output.strip() or "(no output)"
-    except subprocess.TimeoutExpired:
-        return f"Error: Command timed out after {_DEFAULT_TIMEOUT}s — '{effective_command[:80]}'"
+        import threading as _threading
+        _task_id: str | None = getattr(_threading.current_thread(), "_nexus_task_id", None)
+    except Exception:
+        _task_id = None
+
+    try:
+        return _stream_command(args, cwd, task_id=_task_id, command_hint=effective_command)
     except FileNotFoundError:
         return f"Error: Binary '{base_cmd}' not found on PATH. (cwd: {cwd})"
     except Exception as exc:

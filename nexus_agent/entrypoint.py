@@ -95,7 +95,11 @@ KG_CACHE_ROOT: str | None = None
 async def lifespan(app: FastAPI):
     """Manage startup and shutdown lifecycle events."""
     # Startup
-    dashboard_hub.set_loop(asyncio.get_running_loop())
+    _loop = asyncio.get_running_loop()
+    dashboard_hub.set_loop(_loop)
+    # Bind per-task event hub to the same event loop
+    from nexus_agent.core.task_event_hub import task_event_hub as _teh
+    _teh.set_loop(_loop)
     try:
         from nexus_agent.core.scheduler import start_scheduler
         start_scheduler()
@@ -1164,7 +1168,6 @@ async def ws_dashboard(
     await dashboard_hub.connect(websocket)
     try:
         while True:
-            # We only push; ignore incoming text but keep the socket alive.
             await websocket.receive_text()
     except WebSocketDisconnect:
         pass
@@ -1172,6 +1175,43 @@ async def ws_dashboard(
         pass
     finally:
         await dashboard_hub.disconnect(websocket)
+
+
+@app.websocket("/ws/tasks/{task_id}")
+async def ws_task(websocket: WebSocket, task_id: str):
+    """Per-task real-time event stream.
+
+    Clients subscribe to a specific task and receive:
+    * task_start / task_complete / task_failed  — lifecycle
+    * task_step_start / task_step_complete      — LangGraph node enter/exit
+    * execution_output                           — live CLI stdout/stderr lines
+    * agent_thought                              — LLM reasoning snippets
+    * file_event                                 — project file created/modified
+    """
+    from nexus_agent.core.task_event_hub import task_event_hub as _teh
+    # Accept without strict auth — task_id acts as an implicit access token
+    # (only clients who know the task_id can subscribe)
+    await websocket.accept()
+    await _teh.subscribe(task_id, websocket)
+    try:
+        while True:
+            # Keep alive — clients can send {"type": "ping"} for heartbeat
+            data = await websocket.receive_text()
+            if data.strip().lower() in ('{"type":"ping"}', "ping"):
+                await websocket.send_text('{"type":"pong"}')
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
+    finally:
+        await _teh.unsubscribe(task_id, websocket)
+
+
+@app.get("/ws/tasks/{task_id}/replay", tags=["orchestrator"])
+async def ws_task_replay(task_id: str, _: Principal = Depends(require_api_key)):
+    """Return buffered events for a task (for clients that missed the live stream)."""
+    from nexus_agent.core.task_event_hub import task_event_hub as _teh
+    return {"task_id": task_id, "events": _teh.get_buffer(task_id)}
 
 
 # -- Workspace Settings & Config APIs ----------------------------------------
@@ -1538,6 +1578,14 @@ def _run_orchestrator(goal: str, task_id: str) -> None:
     # Signal all agents: task started
     _emit_all_agents(_AMS.THINKING, f"Task: {goal[:60]}")
 
+    # Per-task real-time event hub
+    from nexus_agent.core.task_event_hub import task_event_hub as _teh
+    _teh.task_start(task_id, goal)
+
+    # Store task_id on thread-local so execute_cli_command can stream to the right hub
+    import threading as _threading
+    _threading.current_thread()._nexus_task_id = task_id  # type: ignore[attr-defined]
+
     try:
         from nexus_agent.core.orchestrator import Orchestrator  # lazy to catch ImportError
         orch = Orchestrator()
@@ -1546,7 +1594,66 @@ def _run_orchestrator(goal: str, task_id: str) -> None:
             f"[TASK:{task_id[:8]}] Orchestrator พร้อมทำงาน — กำลังวิเคราะห์...",
             agent_id="system",
         )
-        orch.run_task(goal)
+
+        # ── Granular step streaming via LangGraph stream() ───────────────────
+        # Map LangGraph node names to human-readable step descriptions
+        _STEP_NAMES: dict[str, str] = {
+            "planner":   "📋 Planning — breaking down goal",
+            "executor":  "⚙️  Executing — running implementation steps",
+            "validator": "✅ Validating — checking quality",
+            "learner":   "🧠 Learning — extracting insights",
+        }
+        _STEP_ORDER = ["planner", "executor", "validator", "learner"]
+
+        from nexus_agent.core.state import AgentState
+        initial_state: AgentState = {
+            "goal": goal, "messages": [], "plan": [], "current_step": "",
+            "actions_taken": [], "validation_status": "pending",
+            "validation_feedback": "", "used_rule_ids": [],
+            "learned_skills": [], "final_output": None,
+        }
+
+        final_state = None
+        for output in orch.graph.stream(initial_state):
+            for node_name, state_update in output.items():
+                step_idx = _STEP_ORDER.index(node_name) + 1 if node_name in _STEP_ORDER else 0
+                step_desc = _STEP_NAMES.get(node_name, node_name)
+
+                # Emit step start
+                _teh.step_start(task_id, node_name, step_idx, len(_STEP_ORDER), step_desc)
+                dashboard_hub.emit_log_threadsafe(
+                    f"[{node_name.upper()}] {step_desc}", agent_id=node_name
+                )
+
+                # Extract output snippet
+                msgs     = state_update.get("messages", []) if isinstance(state_update, dict) else []
+                last_msg = msgs[-1] if msgs else None
+                snippet  = ""
+                if last_msg:
+                    snippet = (last_msg.get("content", "") if isinstance(last_msg, dict) else getattr(last_msg, "content", ""))[:200]
+
+                # Emit actions as execution lines
+                actions = state_update.get("actions_taken", []) if isinstance(state_update, dict) else []
+                for action in actions:
+                    _teh.emit_threadsafe(task_id, "execution_output", {
+                        "line": str(action)[:300], "stream": "stdout", "command": node_name,
+                    })
+
+                _teh.step_complete(task_id, node_name, step_idx, snippet)
+
+                # Update node-to-agent mapping for dashboard
+                mapping = getattr(orch, "_node_to_agent", {}).get(node_name)
+                if mapping:
+                    agent_id, role, micro = mapping
+                    dashboard_hub.emit_state_threadsafe(
+                        agent_id=agent_id, role=role, micro_state=micro,
+                        status_message=f"Executed node: {node_name}",
+                    )
+                if snippet:
+                    dashboard_hub.emit_log_threadsafe(f"[{node_name.upper()}] {snippet}", agent_id=node_name)
+
+            final_state = output
+
         logger_.info("Orchestrator finished task %s", task_id)
         dashboard_hub.emit_log_threadsafe(
             f"[TASK:{task_id[:8]}] ✅ Task สำเร็จ!", agent_id="system"
@@ -1554,6 +1661,7 @@ def _run_orchestrator(goal: str, task_id: str) -> None:
         task_store.update_task(task_id, status="completed", finished_at=_dt.now(_tz.utc).isoformat())
         # Reset all agents to IDLE
         _emit_all_agents(_AMS.COMPLETED, "Task completed ✅")
+        _teh.task_complete(task_id, "All steps completed successfully")
         # Send completion notification (email / LINE) — non-blocking
         try:
             import asyncio as _aio
@@ -1580,6 +1688,7 @@ def _run_orchestrator(goal: str, task_id: str) -> None:
         )
         # Reset all agents to ERROR then IDLE
         _emit_all_agents(_AMS.ERROR, f"Task failed: {short_err[:60]}")
+        _teh.task_failed(task_id, str(exc))
         # Send failure notification
         try:
             import asyncio as _aio2
@@ -1646,6 +1755,37 @@ async def cancel_task(task_id: str, _: Principal = Depends(require_api_key)):
     return {"status": "cancelled", "task_id": task_id}
 
 
+@app.delete("/tasks/{task_id}", tags=["orchestrator"])
+async def delete_task(task_id: str, _: Principal = Depends(require_api_key)):
+    """Permanently delete a single task from history."""
+    if not task_store.delete_task(task_id):
+        raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found")
+    return {"status": "deleted", "task_id": task_id}
+
+
+@app.delete("/tasks", tags=["orchestrator"])
+async def bulk_delete_tasks(
+    deduplicate: bool = False,
+    clear_all: bool = False,
+    _: Principal = Depends(require_api_key),
+):
+    """Bulk task management.
+
+    * ``?deduplicate=true`` — remove duplicate tasks (same goal), keep newest
+    * ``?clear_all=true``   — delete all tasks (use with caution)
+    """
+    if clear_all:
+        n = task_store.clear_all_tasks()
+        return {"status": "cleared", "deleted": n}
+    if deduplicate:
+        n = task_store.delete_duplicate_tasks()
+        return {"status": "deduplicated", "deleted": n}
+    raise HTTPException(
+        status_code=400,
+        detail="Specify ?deduplicate=true or ?clear_all=true",
+    )
+
+
 # ── Scene Image Generation ────────────────────────────────────────────────────
 
 class SceneGenerateRequest(BaseModel):
@@ -1695,10 +1835,16 @@ async def generate_scene(
         f"Important constraints — avoid entirely: {request.negative_prompt.strip()}"
     )
 
+    # Truncate combined prompt to DALL-E 3's 4000-char limit
+    if len(prompt) > 3900:
+        prompt = prompt[:3900] + "…"
+
     try:
-        from openai import OpenAI as _OpenAI
-        client = _OpenAI(api_key=openai_key)
-        response = client.images.generate(
+        # Use AsyncOpenAI to avoid blocking FastAPI's event loop during the
+        # image-generation call (which can take 60-180 s for HD quality).
+        from openai import AsyncOpenAI as _AsyncOpenAI
+        async_client = _AsyncOpenAI(api_key=openai_key)
+        response = await async_client.images.generate(
             model="dall-e-3",
             prompt=prompt,
             size=request.size,          # type: ignore[arg-type]
@@ -1714,8 +1860,13 @@ async def generate_scene(
             "quality": request.quality,
         }
     except Exception as exc:
-        logger.error("scene_generate_failed: %s", exc)
-        raise HTTPException(status_code=500, detail=f"Image generation failed: {exc}") from exc
+        err_str = str(exc)
+        logger.error("scene_generate_failed: %s", err_str)
+        # Surface a meaningful detail so the user knows what failed
+        raise HTTPException(
+            status_code=500,
+            detail=f"DALL-E 3 generation failed: {err_str[:400]}",
+        ) from exc
 
 
 # ── Social Media Integration ──────────────────────────────────────────────────

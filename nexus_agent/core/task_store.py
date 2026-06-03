@@ -215,6 +215,28 @@ class TaskStore:
             ).fetchone()
         return dict(row) if row else None
 
+    def delete_task(self, task_id: str) -> bool:
+        with self._conn() as conn:
+            r = conn.execute("DELETE FROM task_runs WHERE task_id = ?", (task_id,))
+        return r.rowcount > 0
+
+    def delete_duplicate_tasks(self) -> int:
+        """Delete tasks with duplicate goals, keeping only the newest per goal."""
+        with self._conn() as conn:
+            result = conn.execute(
+                """DELETE FROM task_runs WHERE task_id NOT IN (
+                    SELECT task_id FROM task_runs
+                    GROUP BY goal
+                    HAVING task_id = MAX(task_id)
+                )"""
+            )
+        return result.rowcount
+
+    def clear_all_tasks(self) -> int:
+        with self._conn() as conn:
+            r = conn.execute("DELETE FROM task_runs")
+        return r.rowcount
+
     def list_tasks(self, limit: int = 100) -> List[Dict[str, Any]]:
         with self._conn() as conn:
             try:
