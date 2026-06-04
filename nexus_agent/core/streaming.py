@@ -141,6 +141,36 @@ async def stream_gemini(
         yield _SSE_DONE
 
 
+async def _try_stream(gen: AsyncGenerator[str, None]) -> tuple[bool, str, list[str]]:
+    """Consume the first SSE event to detect errors before committing to a provider.
+
+    Returns (has_error, error_message, buffered_chunks).
+    If the first data event carries {"error": ...}, we treat this provider as failed.
+    """
+    buffered: list[str] = []
+    try:
+        async for raw in gen:
+            buffered.append(raw)
+            line = raw.strip()
+            if not line.startswith("data:"):
+                continue
+            payload = line[5:].strip()
+            if payload in ("[DONE]", ""):
+                continue
+            try:
+                import json as _json
+                obj = _json.loads(payload)
+                if "error" in obj:
+                    return True, obj["error"], buffered
+            except Exception:
+                pass
+            # First real token — provider is working
+            return False, "", buffered
+    except Exception as exc:
+        return True, str(exc), buffered
+    return False, "", buffered
+
+
 async def stream_inference(
     messages: list[dict],
     *,
@@ -149,10 +179,12 @@ async def stream_inference(
     max_tokens: int = 2048,
     system: str = "",
 ) -> AsyncGenerator[str, None]:
-    """Auto-select the first available provider and stream the response.
+    """Stream LLM tokens with automatic provider fallback.
 
-    Provider priority matches InferenceEngine fallback order:
-    vLLM (local) → OpenAI → Claude → Gemini
+    Tries providers in priority order (vLLM → OpenAI → Claude → Gemini).
+    If the first event from a provider is an error (e.g. 429 insufficient_quota),
+    the next provider is tried automatically — exactly like the non-streaming
+    InferenceEngine fallback chain.
     """
     openai_key   = os.environ.get("OPENAI_API_KEY", "")
     claude_key   = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -161,36 +193,76 @@ async def stream_inference(
 
     target = (provider or "").lower()
 
-    if target in ("", "openai") and openai_key:
-        async for chunk in stream_openai(
-            messages, api_key=openai_key,
-            model=os.environ.get("OPENAI_MODEL", "gpt-4o-mini"),
-            temperature=temperature, max_tokens=max_tokens,
-        ):
-            yield chunk
-    elif target in ("", "claude") and claude_key:
-        async for chunk in stream_anthropic(
-            messages, api_key=claude_key,
-            model=os.environ.get("ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022"),
-            temperature=temperature, max_tokens=max_tokens, system=system,
-        ):
-            yield chunk
-    elif target in ("", "gemini") and gemini_key:
-        async for chunk in stream_gemini(
-            messages, api_key=gemini_key,
-            model=os.environ.get("GEMINI_MODEL", "gemini-1.5-flash"),
-            temperature=temperature, max_tokens=max_tokens,
-        ):
-            yield chunk
-    elif target == "local" and vllm_enabled:
-        async for chunk in stream_openai(
+    # ── Build ordered candidate list ──────────────────────────────────────────
+    candidates: list[tuple[str, AsyncGenerator[str, None]]] = []
+
+    if target == "local" and vllm_enabled:
+        candidates.append(("local", stream_openai(
             messages,
             api_key=os.environ.get("VLLM_API_KEY", "EMPTY"),
             base_url=os.environ.get("VLLM_BASE_URL", "http://localhost:8000/v1"),
             model=os.environ.get("VLLM_MODEL_NAME", "meta-llama/Meta-Llama-3-8B-Instruct"),
             temperature=temperature, max_tokens=max_tokens, provider_name="local",
-        ):
-            yield chunk
+        )))
     else:
+        if vllm_enabled and not target:
+            candidates.append(("local", stream_openai(
+                messages,
+                api_key=os.environ.get("VLLM_API_KEY", "EMPTY"),
+                base_url=os.environ.get("VLLM_BASE_URL", "http://localhost:8000/v1"),
+                model=os.environ.get("VLLM_MODEL_NAME", "meta-llama/Meta-Llama-3-8B-Instruct"),
+                temperature=temperature, max_tokens=max_tokens, provider_name="local",
+            )))
+        if openai_key and target in ("", "openai"):
+            candidates.append(("openai", stream_openai(
+                messages, api_key=openai_key,
+                model=os.environ.get("OPENAI_MODEL", "gpt-4o-mini"),
+                temperature=temperature, max_tokens=max_tokens,
+            )))
+        if claude_key and target in ("", "claude"):
+            candidates.append(("claude", stream_anthropic(
+                messages, api_key=claude_key,
+                model=os.environ.get("ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022"),
+                temperature=temperature, max_tokens=max_tokens, system=system,
+            )))
+        if gemini_key and target in ("", "gemini"):
+            candidates.append(("gemini", stream_gemini(
+                messages, api_key=gemini_key,
+                model=os.environ.get("GEMINI_MODEL", "gemini-1.5-flash"),
+                temperature=temperature, max_tokens=max_tokens,
+            )))
+
+    if not candidates:
         yield _sse({"error": "No LLM provider configured. Set OPENAI_API_KEY, ANTHROPIC_API_KEY, or GEMINI_API_KEY."})
         yield _SSE_DONE
+        return
+
+    # ── Try each candidate; fall back on error ───────────────────────────────
+    last_error = "Unknown error"
+    for pname, gen in candidates:
+        has_err, err_msg, buffered = await _try_stream(gen)
+        if has_err:
+            last_error = err_msg
+            logger.warning("stream_inference: provider %s failed (%s), trying next", pname, err_msg[:80])
+            continue
+
+        # Replay buffered chunks + stream the rest of the generator
+        yield _sse({"provider_used": pname})  # tell client which provider is active
+        for chunk in buffered:
+            yield chunk
+        # The generator was already partially consumed above; it will continue from
+        # where _try_stream left off only if the async gen supports resumption.
+        # Since Python async generators are stateful, we just yield remaining chunks.
+        try:
+            async for chunk in gen:
+                yield chunk
+        except Exception as exc:
+            logger.error("stream_inference: mid-stream error from %s: %s", pname, exc)
+        return  # Done
+
+    # All providers failed
+    yield _sse({
+        "error": f"All providers failed. Last error: {last_error}",
+        "providers_tried": [c[0] for c in candidates],
+    })
+    yield _SSE_DONE

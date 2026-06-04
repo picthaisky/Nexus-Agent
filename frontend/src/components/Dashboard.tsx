@@ -105,6 +105,9 @@ export default function Dashboard() {
     if (data.task_id) {
       setLiveTaskId(data.task_id);
       setLiveTaskGoal(goal);
+      // Notify IsometricRoom so it can subscribe to task-step progress events
+      const { EventBus } = await import("../game/EventBus");
+      EventBus.emit("task-started", data.task_id);
     }
     return data;
   };

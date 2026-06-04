@@ -22,8 +22,11 @@ Available tools:
            python, python3, pip, pip3, pytest, uv,
            node, npm, npx, yarn, pnpm, tsc, bun,
            go, cargo, git, docker, make, echo
-- read_file(file_path: str)         — Read the contents of a file.
-- write_file(file_path: str, content: str) — Create or overwrite a file.
+- read_file(file_path: str)                          — Read a specific file.
+- write_file(file_path: str, content: str)           — Create or overwrite a file.
+- list_files(directory, pattern, recursive)          — List files matching a glob pattern.
+- get_file_tree(root, max_depth)                     — ASCII tree of project structure.
+- search_in_files(pattern, directory, file_glob)     — Search text/regex across files.
 
 STEP TO EXECUTE:
 {step}

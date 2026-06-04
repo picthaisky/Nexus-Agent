@@ -1,9 +1,61 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import {
   Send, Plus, Trash2, RefreshCw, MessageSquare, Bot, User,
-  Zap, Copy, ChevronDown,
+  Zap, Copy, ChevronDown, AlertTriangle, ExternalLink, Settings,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
+
+// ── Error parser: convert raw API errors into user-friendly messages ──────────
+function parseError(raw: string): { title: string; detail: string; isQuota: boolean; provider: string } {
+  const msg = raw.toLowerCase();
+
+  // OpenAI quota/billing
+  if (msg.includes("insufficient_quota") || msg.includes("exceeded your current quota") || msg.includes("billing")) {
+    return {
+      title:   "OpenAI Quota Exhausted",
+      detail:  "Your OpenAI account has no remaining credits. Add billing details or switch to Gemini.",
+      isQuota: true,
+      provider: "openai",
+    };
+  }
+  // OpenAI rate limit
+  if (msg.includes("429") && msg.includes("openai")) {
+    return {
+      title:   "OpenAI Rate Limit",
+      detail:  "Too many requests. The system will automatically retry with Gemini.",
+      isQuota: false,
+      provider: "openai",
+    };
+  }
+  // Gemini quota
+  if (msg.includes("gemini") || msg.includes("generativelanguage")) {
+    return {
+      title:   "Gemini Rate Limit",
+      detail:  "Gemini free tier limit reached (15 req/min). Please wait 1 minute.",
+      isQuota: false,
+      provider: "gemini",
+    };
+  }
+  // No providers
+  if (msg.includes("no llm provider") || msg.includes("no provider")) {
+    return {
+      title:   "No AI Provider Configured",
+      detail:  "Set OPENAI_API_KEY or GEMINI_API_KEY in Stack.env and redeploy.",
+      isQuota: false,
+      provider: "",
+    };
+  }
+  // All providers failed
+  if (msg.includes("all providers failed") || msg.includes("all llm")) {
+    return {
+      title:   "All Providers Unavailable",
+      detail:  raw.replace(/all providers failed\./i, "").trim(),
+      isQuota: false,
+      provider: "all",
+    };
+  }
+  return { title: "LLM Error", detail: raw, isQuota: false, provider: "" };
+}
 
 interface Message  { message_id: number; role: "user" | "assistant" | "system"; content: string; created_at: string }
 interface Session  { session_id: string; title: string; agent_role: string; message_count: number; updated_at: string }
@@ -29,11 +81,12 @@ export function ChatPanel() {
   const [activeId, setActiveId]     = useState<string | null>(null);
   const [messages, setMessages]     = useState<Message[]>([]);
   const [input, setInput]           = useState("");
-  const [streaming, setStreaming]   = useState(false);
-  const [streamBuf, setStreamBuf]   = useState("");
-  const [useStream, setUseStream]   = useState(true);
-  const [newRole, setNewRole]       = useState("planner");
-  const [loadingHist, setLoadingHist] = useState(false);
+  const [streaming,    setStreaming]    = useState(false);
+  const [streamBuf,    setStreamBuf]    = useState("");
+  const [useStream,    setUseStream]    = useState(true);
+  const [newRole,      setNewRole]      = useState("planner");
+  const [loadingHist,  setLoadingHist]  = useState(false);
+  const [providerUsed, setProviderUsed] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const abortRef  = useRef<AbortController | null>(null);
 
@@ -83,7 +136,7 @@ export function ChatPanel() {
     setMessages(m => [...m, { message_id: Date.now(), role: "user", content: userMsg, created_at: new Date().toISOString() }]);
 
     if (useStream) {
-      setStreaming(true); setStreamBuf("");
+      setStreaming(true); setStreamBuf(""); setProviderUsed(null);
       abortRef.current = new AbortController();
       try {
         const r = await fetch(`${base()}/chat/sessions/${activeId}/messages`, {
@@ -95,6 +148,7 @@ export function ChatPanel() {
         const reader = r.body.getReader();
         const dec    = new TextDecoder();
         let full = "";
+        let errorAccum = "";   // collect error text separately
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
@@ -106,14 +160,33 @@ export function ChatPanel() {
             try {
               const d = JSON.parse(raw);
               if (d.token) { full += d.token; setStreamBuf(full); }
-              if (d.error) { full += `\n⚠️ ${d.error}`; setStreamBuf(full); }
+              // provider_used event — show which provider is responding
+              if (d.provider_used) setProviderUsed(d.provider_used);
+              // Error event — accumulate and display at end
+              if (d.error) { errorAccum = d.error; }
             } catch { /* skip malformed */ }
           }
         }
-        setMessages(m => [...m, { message_id: Date.now()+1, role: "assistant", content: full, created_at: new Date().toISOString() }]);
+        // Build final message content
+        if (errorAccum && !full) {
+          // Entire response was an error — show structured error
+          const parsed = parseError(errorAccum);
+          const errMd = [
+            `> ⚠️ **${parsed.title}**`,
+            `> ${parsed.detail}`,
+            parsed.isQuota
+              ? `> \n> **Fix:** [Add OpenAI Credits](https://platform.openai.com/settings/billing) or set \`GEMINI_API_KEY\` in Stack.env`
+              : "",
+          ].filter(Boolean).join("\n");
+          setMessages(m => [...m, { message_id: Date.now()+1, role: "assistant", content: errMd, created_at: new Date().toISOString() }]);
+        } else {
+          setMessages(m => [...m, { message_id: Date.now()+1, role: "assistant", content: full || "(empty response)", created_at: new Date().toISOString() }]);
+        }
       } catch (e: any) {
         if (e.name !== "AbortError") {
-          setMessages(m => [...m, { message_id: Date.now()+1, role: "assistant", content: `⚠️ ${e.message}`, created_at: new Date().toISOString() }]);
+          const parsed = parseError(e.message || "");
+          const errMd = `> ⚠️ **${parsed.title}**\n> ${parsed.detail}`;
+          setMessages(m => [...m, { message_id: Date.now()+1, role: "assistant", content: errMd, created_at: new Date().toISOString() }]);
         }
       } finally {
         setStreaming(false); setStreamBuf("");
@@ -121,15 +194,22 @@ export function ChatPanel() {
       }
     } else {
       // Non-streaming
+      setProviderUsed(null);
       try {
         const r = await fetch(`${base()}/chat/sessions/${activeId}/messages`, {
           method: "POST", headers: headers(),
           body: JSON.stringify({ content: userMsg, stream: false }),
         });
         const d = await r.json();
-        if (r.ok) setMessages(m => [...m, { message_id: Date.now()+1, role: "assistant", content: d.content, created_at: new Date().toISOString() }]);
+        if (r.ok) {
+          setMessages(m => [...m, { message_id: Date.now()+1, role: "assistant", content: d.content, created_at: new Date().toISOString() }]);
+        } else {
+          const parsed = parseError(d.detail || d.content || "Unknown error");
+          setMessages(m => [...m, { message_id: Date.now()+1, role: "assistant", content: `> ⚠️ **${parsed.title}**\n> ${parsed.detail}`, created_at: new Date().toISOString() }]);
+        }
       } catch (e: any) {
-        setMessages(m => [...m, { message_id: Date.now()+1, role: "assistant", content: `⚠️ ${e.message}`, created_at: new Date().toISOString() }]);
+        const parsed = parseError(e.message || "");
+        setMessages(m => [...m, { message_id: Date.now()+1, role: "assistant", content: `> ⚠️ **${parsed.title}**\n> ${parsed.detail}`, created_at: new Date().toISOString() }]);
       }
       await fetchSessions();
     }
@@ -223,13 +303,26 @@ export function ChatPanel() {
         ) : (
           <>
             {/* Header */}
-            <div className="flex-none flex items-center gap-2 px-4 py-2.5 border-b border-cyber-neon/15 bg-cyber-bg/30">
+            <div className="flex-none flex items-center gap-2 px-4 py-2.5 border-b border-cyber-neon/15 bg-cyber-bg/30 flex-wrap">
               <Bot className="w-4 h-4 text-cyber-neon" />
               <span className="text-xs font-mono font-bold text-slate-200">
                 {activeSession?.agent_role.replace(/_/g," ").toUpperCase() || "Agent"}
               </span>
               <span className="text-slate-600">·</span>
-              <span className="text-[10px] text-slate-500">{activeSession?.title}</span>
+              <span className="text-[10px] text-slate-500 truncate">{activeSession?.title}</span>
+              <div className="flex-1" />
+              {/* Provider badge */}
+              {providerUsed && (
+                <span className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[8px] font-mono border ${
+                  providerUsed === "openai"  ? "border-emerald-700/50 bg-emerald-900/20 text-emerald-400" :
+                  providerUsed === "claude"  ? "border-orange-700/50 bg-orange-900/20 text-orange-400"   :
+                  providerUsed === "gemini"  ? "border-blue-700/50 bg-blue-900/20 text-blue-400"         :
+                  "border-slate-700 text-slate-500"
+                }`}>
+                  <Zap className="w-2.5 h-2.5" />
+                  {providerUsed}
+                </span>
+              )}
             </div>
 
             {/* Messages */}

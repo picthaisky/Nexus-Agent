@@ -38,22 +38,42 @@ class TransientError(Exception):
 
 
 def _retryable(exc: BaseException) -> bool:
+    msg = str(exc).lower()
+
+    # ── PERMANENT billing / account errors ────────────────────────────────────
+    # These will never succeed on retry with the same key — fall through to
+    # the next provider immediately (do NOT retry same provider).
+    _PERMANENT = (
+        "insufficient_quota",
+        "billing_hard_limit_reached",
+        "account has been suspended",
+        "account suspended",
+        "no payment method",
+        "payment required",
+        "exceeded your current quota",  # OpenAI billing message
+        "you have no api keys",
+    )
+    if any(k in msg for k in _PERMANENT):
+        return False
+
+    # ── Transient infrastructure errors ──────────────────────────────────────
     if isinstance(exc, (TransientError, TimeoutError, ConnectionError, OSError)):
         return True
+
     name = exc.__class__.__name__.lower()
-    msg  = str(exc).lower()
-    # HTTP 429 / quota exceeded — treat as transient so tenacity retries with backoff.
-    # Gemini free tier returns 429 after 15 req/min; the error message contains the
-    # retry delay in seconds.  We mark it retryable so the exponential backoff kicks in.
+
+    # HTTP 429 RATE-LIMIT (different from billing quota) — retryable with backoff
+    # Gemini free tier: "quota exceeded for metric: …free_tier_requests, limit: 15"
+    # OpenAI rate limit: "rate limit reached for …"
     if (
-        "429" in msg
+        ("429" in msg and "insufficient_quota" not in msg)
         or "rate limit" in msg
-        or "quota" in msg
         or "too many requests" in msg
-        or "generativelanguage" in msg          # Gemini quota string
+        or "generativelanguage" in msg          # Gemini rate-limit quota string
         or "resource_exhausted" in msg.replace(" ", "_")
     ):
         return True
+
     return "timeout" in name or "connection" in name
 
 

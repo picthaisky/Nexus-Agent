@@ -11,8 +11,8 @@ const dist = (x1: number, y1: number, x2: number, y2: number) =>
     Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
 
 // ─── Grid constants ───────────────────────────────────────────────────────────
-const GRID_W   = 24;
-const GRID_H   = 18;
+const GRID_W   = 30;   // expanded: 24 → 30 to fit specialist zones
+const GRID_H   = 22;   // expanded: 18 → 22
 const TILE_W   = 64;
 const TILE_H   = 32;
 const MOVE_SPD = 0.07;
@@ -96,33 +96,63 @@ const P = {
     HAIR:           0x1e1e2e,
 };
 
-// Role tie/accent colors
+// Role tie/accent colors — core + all 16 specialist agents
 const ROLE_ACCENT: Record<string, number> = {
-    planner:   0x1d4ed8,
-    architect: 0x0891b2,
-    developer: 0x166534,
-    ui_weaver: 0x7c3aed,
-    validator: 0xb91c1c,
-    optimizer: 0x92400e,
-    player:    0x2563eb,
+    // Core orchestration
+    planner:         0x1d4ed8,
+    architect:       0x0891b2,
+    developer:       0x166534,
+    ui_weaver:       0x7c3aed,
+    validator:       0xb91c1c,
+    optimizer:       0x92400e,
+    player:          0x2563eb,
+    // Specialist agents
+    code_reviewer:   0x0284c7,
+    debugger:        0xd97706,
+    qa_tester:       0x6d28d9,
+    db_architect:    0x0369a1,
+    devops:          0x1d4ed8,
+    data_analyst:    0x059669,
+    project_mgr:     0x7c3aed,
+    security:        0x9f1239,
+    rag_agent:       0x0e7490,
+    api_integration: 0x92400e,
 };
 
 const AGENT_DESKS: Record<string, { cartX: number; cartY: number }> = {
-    planner:   { cartX: 9,  cartY: 7 },
-    architect: { cartX: 11, cartY: 2 },
-    developer: { cartX: 15, cartY: 3 },
-    ui_weaver: { cartX: 18, cartY: 8 },
-    validator: { cartX: 16, cartY: 14 },
-    optimizer: { cartX: 4,  cartY: 13 },
+    // Core agents — original positions
+    planner:         { cartX: 9,  cartY: 7  },
+    architect:       { cartX: 11, cartY: 2  },
+    developer:       { cartX: 15, cartY: 3  },
+    ui_weaver:       { cartX: 18, cartY: 8  },
+    validator:       { cartX: 16, cartY: 14 },
+    optimizer:       { cartX: 4,  cartY: 13 },
+    // Specialist agents — new zones (grid expanded to 30×22)
+    code_reviewer:   { cartX: 13, cartY: 2  },  // Dev zone extension
+    debugger:        { cartX: 13, cartY: 5  },  // Dev zone extension
+    qa_tester:       { cartX: 4,  cartY: 18 },  // QA Lab
+    db_architect:    { cartX: 15, cartY: 18 },  // DevOps Bay
+    devops:          { cartX: 19, cartY: 18 },  // DevOps Bay
+    data_analyst:    { cartX: 25, cartY: 3  },  // Analytics zone
+    project_mgr:     { cartX: 27, cartY: 6  },  // Analytics zone
+    security:        { cartX: 25, cartY: 12 },  // Security zone
+    rag_agent:       { cartX: 27, cartY: 12 },  // Security zone
+    api_integration: { cartX: 25, cartY: 16 },  // Security zone
 };
 
 const ZONES = {
-    lounge:  { x1: 1,  y1: 2,  x2: 6,  y2: 7,  floor: P.Z_LOUNGE,  accent: 0x9a5c2c },
-    risk:    { x1: 1,  y1: 10, x2: 7,  y2: 16, floor: P.Z_RISK,    accent: P.ALERT },
-    meeting: { x1: 7,  y1: 8,  x2: 14, y2: 14, floor: P.Z_MEET,    accent: 0x166534 },
-    dev:     { x1: 9,  y1: 1,  x2: 17, y2: 7,  floor: P.Z_DEV,    accent: 0x1d4ed8 },
-    design:  { x1: 15, y1: 6,  x2: 22, y2: 12, floor: P.Z_DESIGN,  accent: 0x7c3aed },
-    pantry:  { x1: 18, y1: 12, x2: 22, y2: 16, floor: P.Z_PANTRY,  accent: 0x92400e },
+    // Original 6 zones (preserved)
+    lounge:      { x1: 1,  y1: 2,  x2: 6,  y2: 7,  floor: P.Z_LOUNGE,  accent: 0x9a5c2c },
+    risk:        { x1: 1,  y1: 10, x2: 7,  y2: 16, floor: P.Z_RISK,    accent: P.ALERT },
+    meeting:     { x1: 7,  y1: 8,  x2: 14, y2: 14, floor: P.Z_MEET,    accent: 0x166534 },
+    dev:         { x1: 9,  y1: 1,  x2: 17, y2: 7,  floor: P.Z_DEV,    accent: 0x1d4ed8 },
+    design:      { x1: 15, y1: 6,  x2: 22, y2: 12, floor: P.Z_DESIGN,  accent: 0x7c3aed },
+    pantry:      { x1: 18, y1: 12, x2: 22, y2: 16, floor: P.Z_PANTRY,  accent: 0x92400e },
+    // New specialist zones (grid expanded to 30×22)
+    analytics:   { x1: 23, y1: 1,  x2: 29, y2: 9,  floor: 0xeef6ff,    accent: 0x0891b2 },
+    security:    { x1: 23, y1: 10, x2: 29, y2: 17, floor: 0xfef2f2,    accent: 0x9f1239 },
+    qalab:       { x1: 1,  y1: 17, x2: 10, y2: 21, floor: 0xf5f0ff,    accent: 0x6d28d9 },
+    devops_bay:  { x1: 11, y1: 17, x2: 22, y2: 21, floor: 0xf0f9ff,    accent: 0x1d4ed8 },
 };
 
 interface AgentSpriteData {
@@ -131,11 +161,15 @@ interface AgentSpriteData {
     label:        Phaser.GameObjects.Text;
     bubble?:      Phaser.GameObjects.Container;
     interactHint?: Phaser.GameObjects.Container;
+    progressBar?: Phaser.GameObjects.Graphics;  // live task progress bar
     cartPos:      { x: number; y: number };
     targetCart:   { x: number; y: number };
     wanderTimer:  number;
     currentState: MicroState;
     lastMsg:      string;
+    // A* pathfinding
+    path:         { x: number; y: number }[];
+    pathIdx:      number;
 }
 
 // ─── Scene ────────────────────────────────────────────────────────────────────
@@ -156,6 +190,12 @@ export class OfficeScene extends Scene {
     private walkable: boolean[][] = [];
     private nearbyId:  string | null = null;
     private lastNearby: string | null = null;
+
+    // ── Zone activity lighting layers ────────────────────────────────────────
+    private _zoneActivityLayers: Map<string, Phaser.GameObjects.Graphics> = new Map();
+
+    // ── Permission bubble delay timers (waiting_for_human → 5s delay) ────────
+    private _waitingTimers: Map<string, Phaser.Time.TimerEvent> = new Map();
 
     // ── Drag-to-pan state ─────────────────────────────────────────────────────
     private isPanning      = false;
@@ -201,6 +241,7 @@ export class OfficeScene extends Scene {
         this.checkProximity();
         this.updateNPCs(dt);
         this.animateAvatars();
+        this.updateZoneLighting();
         this.depthSort();
     }
 
@@ -216,17 +257,27 @@ export class OfficeScene extends Scene {
         this.walkable = Array.from({ length: GRID_H }, () => Array(GRID_W).fill(true));
         for (let x = 0; x < GRID_W; x++) { this.walkable[0][x] = this.walkable[GRID_H - 1][x] = false; }
         for (let y = 0; y < GRID_H; y++) { this.walkable[y][0] = this.walkable[y][GRID_W - 1] = false; }
+        // Block all desk tiles (agent desks from AGENT_DESKS)
         for (const d of Object.values(AGENT_DESKS)) {
             this.sw(d.cartX, d.cartY, false);
             this.sw(d.cartX - 1, d.cartY, false);
             this.sw(d.cartX, d.cartY + 1, false);
         }
+        // Meeting table
         for (let x = 8; x <= 12; x++) for (let y = 9; y <= 11; y++) this.sw(x, y, false);
+        // Lounge sofas
         for (let x = 2; x <= 5; x++) for (let y = 3; y <= 5; y++) this.sw(x, y, false);
+        // Risk deck
         for (let x = 2; x <= 5; x++) for (let y = 12; y <= 14; y++) this.sw(x, y, false);
+        // Pantry counter
         for (let x = 19; x <= 21; x++) for (let y = 13; y <= 15; y++) this.sw(x, y, false);
         this.sw(21, 4, false); this.sw(22, 4, false); this.sw(21, 5, false);
         this.sw(18, 4, false); this.sw(19, 8, false); this.sw(13, 2, false);
+        // New zone whiteboards/racks (block 1 tile each)
+        this.sw(23, 4, false); // analytics whiteboard
+        this.sw(28, 11, false); // security risk board
+        this.sw(2, 20, false);  // QA whiteboard
+        this.sw(22, 19, false); // DevOps server rack
     }
 
     private sw(x: number, y: number, v: boolean) {
@@ -267,6 +318,7 @@ export class OfficeScene extends Scene {
             this.drawZoneRim(zone);
         }
 
+        // Original zone labels
         this.zoneLabel('Lounge',              2.5, 2.1, 0x334155);
         this.zoneLabel('Risk Monitoring Area',3.5, 10.2, P.ALERT);
         this.zoneLabel('Planner / Coordinator',8.6, 7.1, 0x1d4ed8);
@@ -276,6 +328,22 @@ export class OfficeScene extends Scene {
         this.zoneLabel('UI Reviewer',         18.2, 6.2, 0x7c3aed);
         this.zoneLabel('Validator',           16.2, 13.1, P.ALERT);
         this.zoneLabel('Pantry',              20.2, 12.1, 0x92400e);
+        // New specialist zone labels
+        this.zoneLabel('Analytics',           24.5, 1.2, 0x0891b2);
+        this.zoneLabel('Security',            24.5, 10.2, 0x9f1239);
+        this.zoneLabel('QA Lab',              2.5, 17.2, 0x6d28d9);
+        this.zoneLabel('DevOps Bay',          13.5, 17.2, 0x1d4ed8);
+        // Specialist desk name tags
+        this.zoneLabel('Code Reviewer',       12.6, 1.1, 0x0284c7);
+        this.zoneLabel('Debugger',            12.6, 4.1, 0xd97706);
+        this.zoneLabel('Data Analyst',        24.5, 2.5, 0x059669);
+        this.zoneLabel('Project Manager',     26.5, 5.5, 0x7c3aed);
+        this.zoneLabel('Security Auditor',    24.5, 11.2, 0x9f1239);
+        this.zoneLabel('RAG Agent',           26.5, 11.2, 0x0e7490);
+        this.zoneLabel('API Integration',     24.5, 15.2, 0x92400e);
+        this.zoneLabel('QA Tester',           3.5, 17.5, 0x6d28d9);
+        this.zoneLabel('DB Architect',        14.5, 17.5, 0x0369a1);
+        this.zoneLabel('DevOps',              18.5, 17.5, 0x1d4ed8);
     }
 
     private diamond(g: Phaser.GameObjects.Graphics, cx: number, cy: number,
@@ -632,6 +700,25 @@ export class OfficeScene extends Scene {
         // Risk monitoring area
         this.drawRiskMonitoringDeck(3.9, 13.1);
         this.drawRiskBoard(6.4, 11.1);
+
+        // ── New specialist zones furniture ────────────────────────────────
+        // Analytics zone plants + whiteboard
+        this.drawWhiteboard(23.5, 4.5);
+        this.drawPlant(28.8, 1.5);
+        this.drawPlant(23.5, 8.5);
+
+        // Security zone risk board
+        this.drawRiskBoard(28.5, 11.5);
+        this.drawPlant(23.5, 16.8);
+
+        // QA Lab whiteboard + chairs
+        this.drawWhiteboard(2.1, 20.8);
+        this.drawPlant(9.5, 20.5);
+
+        // DevOps Bay server rack + plants
+        this.drawServerRack(22.5, 19.1);
+        this.drawPlant(11.2, 20.5);
+        this.drawPlant(20.5, 20.5);
     }
 
     /** Warm-wood desk with proper isometric box + monitor */
@@ -1088,6 +1175,21 @@ export class OfficeScene extends Scene {
         'designing', 'thinking', 'planning',
     ]);
 
+    /** Animation family for a given state — mirrors Pixel Agents toolUtils approach. */
+    private static _toolFamily(state: MicroState): 'typing' | 'reading' | 'active' | 'idle' {
+        switch (state) {
+            case 'coding':
+            case 'executing':
+            case 'optimizing':   return 'typing';
+            case 'thinking':
+            case 'planning':
+            case 'designing':    return 'reading';
+            case 'testing':
+            case 'waiting_for_human': return 'active';
+            default:             return 'idle';
+        }
+    }
+
     private drawAvatar(
         gfx: Phaser.GameObjects.Graphics,
         accent: number,
@@ -1120,7 +1222,9 @@ export class OfficeScene extends Scene {
         }
 
         const b = bob;
-        const isTyping = sitting && (state === 'coding' || state === 'executing' || state === 'optimizing');
+        const family   = OfficeScene._toolFamily(state);
+        const isTyping = sitting && family === 'typing';
+        const isReading = sitting && family === 'reading';  // thinking/planning/designing
         const isActive = state !== 'idle';
 
         // ── SITTING POSE ──────────────────────────────────────────────────────
@@ -1191,20 +1295,49 @@ export class OfficeScene extends Scene {
             // Activity pin
             if (isActive) { gfx.fillStyle(this.stateAccent(state), 0.9); gfx.fillCircle(-4, -36 + b, 2); }
 
-            // ─ Arms — typing pose when coding, relaxed otherwise ─
+            // ─ Arms — 3 distinct poses by tool family ─
             if (isTyping) {
-                const tap = Math.sin(s * 7) * 2;  // keyboard tap animation
+                // TYPING: fast alternating keyboard-tap hands
+                const tap = Math.sin(s * 7) * 2;
                 gfx.fillStyle(P.SUIT, 0.95);
-                gfx.fillRect(-14, -36 + b, 12, 4); // left forearm horizontal
-                gfx.fillRect(  2, -36 + b, 12, 4); // right forearm horizontal
+                gfx.fillRect(-14, -36 + b, 12, 4);
+                gfx.fillRect(  2, -36 + b, 12, 4);
                 gfx.fillStyle(P.SHIRT, 0.8);
-                gfx.fillRect(-14, -36 + b, 3, 3);  // left cuff
-                gfx.fillRect( 11, -36 + b, 3, 3);  // right cuff
+                gfx.fillRect(-14, -36 + b, 3, 3);
+                gfx.fillRect( 11, -36 + b, 3, 3);
                 gfx.fillStyle(P.SKIN, 1);
-                gfx.fillEllipse(-8, -32 + tap + b, 5, 4);  // left hand (typing)
-                gfx.fillEllipse( 8, -32 - tap + b, 5, 4);  // right hand
+                gfx.fillEllipse(-8, -32 + tap + b, 5, 4);
+                gfx.fillEllipse( 8, -32 - tap + b, 5, 4);
+            } else if (isReading) {
+                // READING: left elbow on desk, right hand resting on document
+                const nod = Math.sin(s * 1.2) * 1.5;  // slow thinking nod
+                // Small document on desk in front of agent
+                gfx.fillStyle(0xffffff, 0.85);
+                gfx.fillRect(-6, -28 + b, 12, 8);
+                gfx.lineStyle(0.5, 0xd0d0d0, 0.7);
+                gfx.strokeRect(-6, -28 + b, 12, 8);
+                gfx.lineStyle(0.4, 0xaab4c0, 0.5);
+                for (let li = 0; li < 3; li++) {
+                    gfx.beginPath(); gfx.moveTo(-4, -26 + b + li * 2); gfx.lineTo(4, -26 + b + li * 2); gfx.strokePath();
+                }
+                // Left arm: forward-bent elbow on desk
+                gfx.fillStyle(P.SUIT, 0.95);
+                gfx.fillRect(-13, -38 + b, 5, 12);  // upper arm down
+                gfx.fillRect(-13, -26 + b, 10, 4);  // forearm horizontal (elbow on desk)
+                gfx.fillStyle(P.SHIRT, 0.8);
+                gfx.fillRect(-13, -26 + b, 3, 3);
+                gfx.fillStyle(P.SKIN, 1);
+                gfx.fillEllipse(-4, -24 + nod + b, 5, 5);  // hand near chin (nodding)
+                // Right arm: resting on document
+                gfx.fillStyle(P.SUIT, 0.95);
+                gfx.fillRect( 8, -38 + b, 5, 12);
+                gfx.fillRect( 2, -28 + b, 10, 4);
+                gfx.fillStyle(P.SHIRT, 0.8);
+                gfx.fillRect( 9, -28 + b, 3, 3);
+                gfx.fillStyle(P.SKIN, 1);
+                gfx.fillEllipse( 7, -26 + b, 5, 4);  // hand on document
             } else {
-                // Arms resting on armrests
+                // DEFAULT: arms resting on armrests
                 gfx.fillStyle(P.SUIT, 0.95);
                 gfx.fillRect(-12, -38 + b, 5, 8);
                 gfx.fillRect(  7, -38 + b, 5, 8);
@@ -1329,6 +1462,134 @@ export class OfficeScene extends Scene {
         }
     }
 
+    // ── Matrix spawn/despawn effect (Pixel Agents inspired) ─────────────────
+
+    /** Digital-rain effect when an agent first appears. 16 staggered columns of
+     *  falling neon dots, lasting 300 ms total. Container starts hidden and fades in. */
+    private _playSpawnEffect(container: Phaser.GameObjects.Container, sx: number, sy: number) {
+        container.setAlpha(0);
+        const COLS = 16;
+        const DURATION = 300;
+        const fx = this.add.graphics().setDepth(sy + 50);
+        const col = 0x5fe1ff;
+
+        for (let c = 0; c < COLS; c++) {
+            const delay = (c / COLS) * DURATION * 0.6;
+            this.time.delayedCall(delay, () => {
+                if (!fx.active) return;
+                const cx = sx - 40 + c * 5;
+                for (let row = 0; row < 8; row++) {
+                    const alpha = 0.8 - row * 0.09;
+                    fx.fillStyle(col, Math.max(0, alpha));
+                    fx.fillRect(cx, sy - 80 + row * 10, 3, 8);
+                }
+            });
+        }
+        // Fade in container + destroy effect after full duration
+        this.tweens.add({ targets: container, alpha: 1, duration: DURATION * 0.5, delay: DURATION * 0.4 });
+        this.time.delayedCall(DURATION + 50, () => { if (fx.active) fx.destroy(); });
+    }
+
+    /** Quick shrink-out + digital rain despawn. */
+    private _playDespawnEffect(container: Phaser.GameObjects.Container, onDone: () => void) {
+        const DURATION = 250;
+        this.tweens.add({
+            targets: container, alpha: 0, scaleY: 0.1,
+            duration: DURATION, ease: 'Power2',
+            onComplete: onDone,
+        });
+    }
+
+    // ── Zone activity lighting ───────────────────────────────────────────────
+
+    /** Update pulsing overlay on each zone based on whether any agent is active there. */
+    private updateZoneLighting() {
+        const t = this.time.now / 1000;
+        for (const [name, zone] of Object.entries(ZONES)) {
+            // Count non-idle agents in this zone
+            let active = 0;
+            for (const [id] of this.agentSprites) {
+                const agentZone = this._agentZone(id);
+                if (agentZone !== zone) continue;
+                const state = this.agentStates[id]?.current_micro_state ?? 'idle';
+                if (state !== 'idle' && state !== 'walking') active++;
+            }
+
+            if (active === 0) {
+                // No active agents: remove overlay if present
+                const existing = this._zoneActivityLayers.get(name);
+                if (existing?.active) existing.setAlpha(0);
+                continue;
+            }
+
+            // Pulse: 0.5 Hz sine, amplitude 0.08–0.18
+            const pulse = 0.08 + 0.1 * Math.abs(Math.sin(t * Math.PI));
+            let layer = this._zoneActivityLayers.get(name);
+            if (!layer || !layer.active) {
+                layer = this.add.graphics().setDepth(-140);
+                this._zoneActivityLayers.set(name, layer);
+                for (let x = zone.x1; x <= zone.x2; x++) {
+                    for (let y = zone.y1; y <= zone.y2; y++) {
+                        const p = this.c2i(x, y);
+                        layer.fillStyle(zone.accent, 1);
+                        layer.lineStyle(0, zone.accent, 0);
+                        this.diamond(layer, p.x, p.y);
+                    }
+                }
+            }
+            layer.setAlpha(pulse);
+        }
+    }
+
+    // ── A* Pathfinding ───────────────────────────────────────────────────────
+
+    /** Simple A* on the cartesian walkable grid. Returns array of steps to walk.
+     *  Uses Manhattan distance heuristic; suitable for the small 30×22 grid. */
+    private _astar(fx: number, fy: number, tx: number, ty: number): { x: number; y: number }[] {
+        const startX = Math.round(fx), startY = Math.round(fy);
+        const goalX  = Math.round(tx),  goalY  = Math.round(ty);
+
+        if (startX === goalX && startY === goalY) return [];
+        if (!this.ok(goalX, goalY)) return [];
+
+        type Node = { x: number; y: number; g: number; f: number; parent: Node | null };
+        const open: Node[]   = [];
+        const closed          = new Set<string>();
+        const key = (x: number, y: number) => `${x},${y}`;
+
+        const start: Node = { x: startX, y: startY, g: 0, f: Math.abs(goalX - startX) + Math.abs(goalY - startY), parent: null };
+        open.push(start);
+
+        const DIRS = [[1,0],[-1,0],[0,1],[0,-1]] as const;
+        let iterations = 0;
+        const MAX_ITER = 400;
+
+        while (open.length > 0 && iterations++ < MAX_ITER) {
+            open.sort((a, b) => a.f - b.f);
+            const cur = open.shift()!;
+            if (cur.x === goalX && cur.y === goalY) {
+                // Reconstruct path
+                const path: { x: number; y: number }[] = [];
+                let node: Node | null = cur;
+                while (node) { path.unshift({ x: node.x, y: node.y }); node = node.parent; }
+                return path.slice(1); // exclude start position
+            }
+            closed.add(key(cur.x, cur.y));
+            for (const [dx, dy] of DIRS) {
+                const nx = cur.x + dx, ny = cur.y + dy;
+                if (!this.ok(nx, ny) || closed.has(key(nx, ny))) continue;
+                const g = cur.g + 1;
+                const existing = open.find(n => n.x === nx && n.y === ny);
+                if (existing) {
+                    if (g < existing.g) { existing.g = g; existing.f = g + Math.abs(goalX - nx) + Math.abs(goalY - ny); existing.parent = cur; }
+                } else {
+                    open.push({ x: nx, y: ny, g, f: g + Math.abs(goalX - nx) + Math.abs(goalY - ny), parent: cur });
+                }
+            }
+        }
+        return []; // no path found
+    }
+
     // ── Player spawn ─────────────────────────────────────────────────────────
 
     private spawnPlayer() {
@@ -1360,9 +1621,17 @@ export class OfficeScene extends Scene {
         };
         this.eKey = this.input.keyboard!.addKey('E');
 
-        // ── Scroll-wheel zoom ─────────────────────────────────────────────────
+        // ── Scroll-wheel zoom — snaps to integer-friendly levels for crisp pixels ──
+        // Pixel Agents approach: integer DPR baking prevents subpixel blurring.
+        const ZOOM_STEPS = [0.35, 0.5, 0.66, 0.85, 1.0, 1.25, 1.5, 2.0, 2.5];
         this.input.on('wheel', (_p: unknown, _g: unknown, _dx: number, dy: number) => {
-            this.cameras.main.setZoom(clamp(this.cameras.main.zoom - dy * 0.001, 0.3, 2.5));
+            const cur  = this.cameras.main.zoom;
+            const dir  = dy > 0 ? -1 : 1;  // scroll down = zoom out
+            const idx  = ZOOM_STEPS.findIndex(z => z >= cur - 0.01);
+            const next = dir > 0
+                ? ZOOM_STEPS[Math.min(idx + 1, ZOOM_STEPS.length - 1)]
+                : ZOOM_STEPS[Math.max(idx - 1, 0)];
+            this.cameras.main.setZoom(next);
         });
 
         // ── Drag-to-pan (left button or middle button) ────────────────────────
@@ -1415,15 +1684,84 @@ export class OfficeScene extends Scene {
         this.spawnExpFx(fx);
     };
 
+    // ── Agent thought bubbles (cloud-style, auto-dismiss 3 s) ───────────────
+    private _onAgentThought = (payload: { agentId: string; thought: string }) => {
+        if (!this.scene?.isActive('OfficeScene')) return;
+        const d = this.agentSprites.get(payload.agentId);
+        if (!d?.container?.active || !this.add) return;
+
+        const thought = payload.thought.length > 60 ? payload.thought.slice(0, 57) + '…' : payload.thought;
+        const cloud = this.add.graphics();
+        // Cloud shape: rounded rect with small bumps on bottom
+        cloud.fillStyle(0xffffff, 0.92);
+        cloud.lineStyle(0.8, 0x94a3b8, 0.6);
+        cloud.fillRoundedRect(-44, -152, 88, 20, 6);
+        cloud.strokeRoundedRect(-44, -152, 88, 20, 6);
+        // Tail bumps
+        cloud.fillEllipse(-8, -133, 8, 8);
+        cloud.fillEllipse(0,  -131, 6, 6);
+        cloud.fillEllipse(8,  -130, 5, 5);
+        const cloudTxt = this.add.text(0, -142, thought, {
+            fontFamily: 'Inter, system-ui, sans-serif', fontSize: '6px',
+            color: '#374151', fontStyle: 'italic',
+            wordWrap: { width: 80 },
+        }).setOrigin(0.5);
+        const thoughtBub = this.add.container(0, 0, [cloud, cloudTxt]).setAlpha(0);
+        d.container.add(thoughtBub);
+        this.tweens.add({ targets: thoughtBub, alpha: 1, duration: 200 });
+        this.time.delayedCall(3000, () => {
+            if (!thoughtBub.active) return;
+            this.tweens.add({
+                targets: thoughtBub, alpha: 0, y: thoughtBub.y - 8, duration: 300,
+                onComplete: () => thoughtBub.destroy(),
+            });
+        });
+    };
+
+    // ── Task progress events ─────────────────────────────────────────────────
+    private _onTaskStep = (payload: { agentId: string; step: number; total: number }) => {
+        if (!this.scene?.isActive('OfficeScene')) return;
+        const d = this.agentSprites.get(payload.agentId);
+        if (!d?.progressBar || !d.container?.active) return;
+        const BAR_W = 32;
+        const pct   = Math.min(1, payload.step / Math.max(1, payload.total));
+        d.progressBar.clear();
+        // Background track
+        d.progressBar.fillStyle(0xd1d5db, 0.6);
+        d.progressBar.fillRoundedRect(-16, -98, BAR_W, 3, 1.5);
+        // Fill
+        const fillCol = pct >= 1 ? P.OK : 0x5fe1ff;
+        d.progressBar.fillStyle(fillCol, 1);
+        d.progressBar.fillRoundedRect(-16, -98, Math.round(BAR_W * pct), 3, 1.5);
+    };
+
+    private _onTaskDone = (agentId: string) => {
+        if (!this.scene?.isActive('OfficeScene')) return;
+        const d = this.agentSprites.get(agentId);
+        if (!d?.progressBar) return;
+        // Full green briefly, then fade out
+        this._onTaskStep({ agentId, step: 1, total: 1 });
+        this.time.delayedCall(2000, () => d.progressBar?.clear());
+    };
+
     private setupEvents() {
-        EventBus.on('update-agents', this._onUpdateAgents);
-        EventBus.on('exp-effects',   this._onExpEffects);
+        EventBus.on('update-agents',   this._onUpdateAgents);
+        EventBus.on('exp-effects',     this._onExpEffects);
+        EventBus.on('task-step',       this._onTaskStep);
+        EventBus.on('task-done',       this._onTaskDone);
+        EventBus.on('agent-thought',   this._onAgentThought);
     }
 
     /** Remove all EventBus listeners owned by this scene instance. */
     private _cleanupEventBus() {
-        EventBus.removeListener('update-agents', this._onUpdateAgents);
-        EventBus.removeListener('exp-effects',   this._onExpEffects);
+        EventBus.removeListener('update-agents',  this._onUpdateAgents);
+        EventBus.removeListener('exp-effects',    this._onExpEffects);
+        EventBus.removeListener('task-step',      this._onTaskStep);
+        EventBus.removeListener('task-done',      this._onTaskDone);
+        EventBus.removeListener('agent-thought',  this._onAgentThought);
+        // Cancel all pending waiting timers
+        this._waitingTimers.forEach(t => t.destroy());
+        this._waitingTimers.clear();
         // Reset drag cursor if canvas still exists
         try { if (this.game?.canvas) this.game.canvas.style.cursor = 'default'; } catch { /* ignore */ }
     }
@@ -1481,17 +1819,35 @@ export class OfficeScene extends Scene {
         this.eWasDown = eD;
     }
 
+    /** Map each agent id to its home wander zone */
+    private _agentZone(id: string) {
+        switch (id) {
+            case 'planner':         return ZONES.meeting;
+            case 'architect':
+            case 'developer':
+            case 'code_reviewer':
+            case 'debugger':        return ZONES.dev;
+            case 'ui_weaver':       return ZONES.design;
+            case 'validator':       return ZONES.pantry;
+            case 'optimizer':       return ZONES.risk;
+            case 'data_analyst':
+            case 'project_mgr':     return ZONES.analytics;
+            case 'security':
+            case 'rag_agent':
+            case 'api_integration': return ZONES.security;
+            case 'qa_tester':       return ZONES.qalab;
+            case 'db_architect':
+            case 'devops':          return ZONES.devops_bay;
+            default:                return ZONES.meeting;
+        }
+    }
+
     private updateNPCs(dt: number) {
         for (const [id, d] of this.agentSprites) {
             const agent = this.agentStates[id]; if (!agent) continue;
             d.wanderTimer -= dt;
             const desk = AGENT_DESKS[id] ?? { cartX: 5, cartY: 5 };
-            const zone = id === 'planner' ? ZONES.meeting
-                : id === 'architect' || id === 'developer' ? ZONES.dev
-                : id === 'ui_weaver' ? ZONES.design
-                : id === 'validator' ? ZONES.pantry
-                : id === 'optimizer' ? ZONES.risk
-                : ZONES.meeting;
+            const zone = this._agentZone(id);
 
             if (agent.current_micro_state === 'walking' || agent.current_micro_state === 'idle') {
                 if (d.wanderTimer <= 0) {
@@ -1516,17 +1872,34 @@ export class OfficeScene extends Scene {
     }
 
     private tweenTo(_id: string, d: AgentSpriteData, cx: number, cy: number) {
-        const pt = this.c2i(cx, cy);
-        const sc = { x: d.cartPos.x, y: d.cartPos.y };
+        // Use A* to find a collision-free path, then follow it step by step.
+        const path = this._astar(d.cartPos.x, d.cartPos.y, cx, cy);
+        if (path.length === 0) return;
+
+        d.path    = path;
+        d.pathIdx = 0;
         d.targetCart = { x: cx, y: cy };
-        const dur = randBetween(1200, 2200); let el = 0;
+        this._walkNextStep(d);
+    }
+
+    /** Walk one step along d.path then schedule the next. */
+    private _walkNextStep(d: AgentSpriteData) {
+        if (d.pathIdx >= d.path.length) return;
+        const step = d.path[d.pathIdx++];
+        const pt   = this.c2i(step.x, step.y);
+        const sc   = { x: d.cartPos.x, y: d.cartPos.y };
+        const dur  = randBetween(280, 420); // per-tile duration (smooth gait)
+        let el = 0;
         this.tweens.add({
-            targets: d.container, x: pt.x, y: pt.y, duration: dur, ease: 'Sine.easeInOut',
-            onUpdate: (_: unknown, __: unknown, ___: string, ____: number, _____: number, dt: number) => {
-                el = Math.min(el + dt, dur); const pr = el / dur;
-                d.cartPos = { x: sc.x + (cx - sc.x) * pr, y: sc.y + (cy - sc.y) * pr };
+            targets: d.container, x: pt.x, y: pt.y, duration: dur, ease: 'Linear',
+            onUpdate: (_: unknown, __: unknown, ___: string, ____: number, _____: number, delta: number) => {
+                el = Math.min(el + delta, dur); const pr = el / dur;
+                d.cartPos = { x: sc.x + (step.x - sc.x) * pr, y: sc.y + (step.y - sc.y) * pr };
             },
-            onComplete: () => { d.cartPos = { x: cx, y: cy }; },
+            onComplete: () => {
+                d.cartPos = { x: step.x, y: step.y };
+                this._walkNextStep(d);
+            },
         });
     }
 
@@ -1568,7 +1941,13 @@ export class OfficeScene extends Scene {
 
         const ids = new Set(Object.keys(agents));
         for (const [id, d] of this.agentSprites) {
-            if (!ids.has(id)) { d.container.destroy(); this.agentSprites.delete(id); }
+            if (!ids.has(id)) {
+                // Matrix despawn before destroying
+                this._playDespawnEffect(d.container, () => {
+                    d.container.destroy();
+                    this.agentSprites.delete(id);
+                });
+            }
         }
 
         let idx = 0;
@@ -1611,63 +1990,101 @@ export class OfficeScene extends Scene {
                 }).setOrigin(0.5);
                 const hint = this.add.container(0, 0, [hintBg, hintTxt]).setVisible(false);
 
-                con.add([body, plateBg, roleTagBg, nameText, roleText, hint]);
+                // ─ Progress bar (hidden by default) ─
+                const progressBar = this.add.graphics();
+                con.add([body, plateBg, roleTagBg, nameText, roleText, hint, progressBar]);
 
                 this.agentSprites.set(id, {
-                    container: con, body, label: nameText, interactHint: hint,
+                    container: con, body, label: nameText, interactHint: hint, progressBar,
                     cartPos: { x: desk.cartX, y: desk.cartY },
                     targetCart: { x: desk.cartX, y: desk.cartY },
                     wanderTimer: randBetween(2000, 6000),
                     currentState: agent.current_micro_state, lastMsg: '',
+                    path: [], pathIdx: 0,
                 });
+
+                // ─ Matrix spawn effect (0.3s digital rain on first appearance) ─
+                this._playSpawnEffect(con, p.x, p.y);
             }
 
             const sd = this.agentSprites.get(id)!;
             sd.currentState = agent.current_micro_state;
 
-            // Speech bubble — clean white card with accent left border
+            // ── P1.5: Permission bubble delay ───────────────────────────────
+            // For waiting_for_human: delay 5 s before showing bubble (avoids noise
+            // on fast tool executions). For all other states: show immediately.
+            const isWaiting = agent.current_micro_state === 'waiting_for_human';
             const msg = agent.status_message?.trim();
             const show = msg && msg !== sd.lastMsg &&
                 !['Task completed', 'Task failed', 'Completed', ''].includes(msg);
 
-            if (show) {
+            if (show && isWaiting) {
+                sd.lastMsg = msg!;
+                // Cancel any existing timer, then set 5 s delay
+                const existingTimer = this._waitingTimers.get(id);
+                if (existingTimer) existingTimer.destroy();
+                const timer = this.time.delayedCall(5000, () => {
+                    this._waitingTimers.delete(id);
+                    if (!sd.container?.active || !this.add) return;
+                    if (agent.current_micro_state !== 'waiting_for_human') return; // state changed
+                    this._showBubble(sd, `⏸ ${msg!}`, agent.current_micro_state);
+                });
+                this._waitingTimers.set(id, timer);
+                idx++; continue;
+            }
+
+            if (show && !isWaiting) {
+                // Cancel pending waiting timer (state changed away)
+                const t = this._waitingTimers.get(id);
+                if (t) { t.destroy(); this._waitingTimers.delete(id); }
+
                 sd.bubble?.destroy(); sd.bubble = undefined;
                 sd.lastMsg = msg!;
 
                 // Guard: container may have been destroyed if the scene is shutting down
                 if (!sd.container?.active || !this.add) { idx++; continue; }
 
-                const truncated = msg!.length > 72 ? msg!.slice(0, 69) + '…' : msg!;
-                const sa = this.stateAccent(agent.current_micro_state);
-                const isErr = agent.current_micro_state === 'error';
-
-                const bbg = this.add.graphics();
-                bbg.fillStyle(isErr ? 0xfff1f2 : 0xffffff, 0.97);
-                bbg.lineStyle(0.5, 0xe2e8f0, 0.8);
-                bbg.fillRoundedRect(-57, -135, 114, 26, 3);
-                bbg.strokeRoundedRect(-57, -135, 114, 26, 3);
-                bbg.fillStyle(sa, 1);
-                bbg.fillRoundedRect(-57, -135, 3, 26, { tl: 3, bl: 3, tr: 0, br: 0 });
-
-                const btxt = this.add.text(-48, -122, truncated, {
-                    fontFamily: 'Inter, system-ui, sans-serif', fontSize: '7px', color: '#374151',
-                    wordWrap: { width: 104 },
-                }).setOrigin(0, 0.5);
-
-                const bub = this.add.container(0, 0, [bbg, btxt]).setAlpha(0);
-                sd.container.add(bub); sd.bubble = bub;
-                this.tweens.add({ targets: bub, alpha: 1, duration: 250 });
-                this.time.delayedCall(5000, () => {
-                    if (sd.bubble === bub) {
-                        this.tweens.add({
-                            targets: bub, alpha: 0, y: bub.y - 6, duration: 350,
-                            onComplete: () => { bub.destroy(); if (sd.bubble === bub) sd.bubble = undefined; },
-                        });
-                    }
-                });
+                this._showBubble(sd, msg!, agent.current_micro_state);
             }
             idx++;
         }
+    }
+
+    // ── Speech bubble helper ─────────────────────────────────────────────────
+
+    /** Show a status bubble above the agent. Auto-dismisses after 5 s. */
+    private _showBubble(sd: AgentSpriteData, msg: string, state: MicroState) {
+        if (!sd.container?.active || !this.add) return;
+        sd.bubble?.destroy(); sd.bubble = undefined;
+
+        const truncated = msg.length > 72 ? msg.slice(0, 69) + '…' : msg;
+        const sa     = this.stateAccent(state);
+        const isErr  = state === 'error';
+
+        const bbg = this.add.graphics();
+        bbg.fillStyle(isErr ? 0xfff1f2 : 0xffffff, 0.97);
+        bbg.lineStyle(0.5, 0xe2e8f0, 0.8);
+        bbg.fillRoundedRect(-57, -135, 114, 26, 3);
+        bbg.strokeRoundedRect(-57, -135, 114, 26, 3);
+        bbg.fillStyle(sa, 1);
+        bbg.fillRoundedRect(-57, -135, 3, 26, { tl: 3, bl: 3, tr: 0, br: 0 });
+
+        const btxt = this.add.text(-48, -122, truncated, {
+            fontFamily: 'Inter, system-ui, sans-serif', fontSize: '7px', color: '#374151',
+            wordWrap: { width: 104 },
+        }).setOrigin(0, 0.5);
+
+        const bub = this.add.container(0, 0, [bbg, btxt]).setAlpha(0);
+        sd.container.add(bub); sd.bubble = bub;
+        this.tweens.add({ targets: bub, alpha: 1, duration: 250 });
+        this.time.delayedCall(4000, () => {
+            if (sd.bubble === bub) {
+                this.tweens.add({
+                    targets: bub, alpha: 0, y: bub.y - 6, duration: 350,
+                    onComplete: () => { bub.destroy(); if (sd.bubble === bub) sd.bubble = undefined; },
+                });
+            }
+        });
     }
 
     // ── EXP effects ──────────────────────────────────────────────────────────
