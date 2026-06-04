@@ -64,11 +64,21 @@ class Settings(BaseSettings):
     metrics_enabled: bool = Field(default=True, alias="METRICS_ENABLED")
     json_logs: bool = Field(default=True, alias="JSON_LOGS")
 
-    # ── LLM providers (mirror existing inference.py contract) ────────────
+    # ── LLM providers ────────────────────────────────────────────────────
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
+    openai_base_url: str = Field(default="https://api.openai.com/v1", alias="OPENAI_BASE_URL")
+    openai_model: str = Field(default="gpt-4o-mini", alias="OPENAI_MODEL")
+
     anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
+    anthropic_model: str = Field(default="claude-3-5-sonnet-20241022", alias="ANTHROPIC_MODEL")
+
     gemini_api_key: str = Field(default="", alias="GEMINI_API_KEY")
+    gemini_model: str = Field(default="gemini-1.5-flash", alias="GEMINI_MODEL")
+
     vllm_enabled: bool = Field(default=False, alias="VLLM_ENABLED")
+    vllm_base_url: str = Field(default="http://localhost:8000/v1", alias="VLLM_BASE_URL")
+    vllm_model_name: str = Field(default="meta-llama/Meta-Llama-3-8B-Instruct", alias="VLLM_MODEL_NAME")
+    vllm_api_key: str = Field(default="EMPTY", alias="VLLM_API_KEY")
 
     # ── Reliability ──────────────────────────────────────────────────────
     inference_timeout_seconds: float = Field(default=60.0, alias="INFERENCE_TIMEOUT_SECONDS")

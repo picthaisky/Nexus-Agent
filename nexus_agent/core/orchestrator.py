@@ -27,7 +27,10 @@ from nexus_agent.agents.search_agent import SearchAgent
 from nexus_agent.agents.finance_agent import FinanceAgent
 from nexus_agent.agents.content_creator_agent import ContentCreatorAgent
 from nexus_agent.tools.base import ToolRegistry
-from nexus_agent.tools.system_tools import execute_cli_command, read_file, write_file
+from nexus_agent.tools.system_tools import (
+    execute_cli_command, read_file, write_file,
+    list_files, get_file_tree, search_in_files,
+)
 from nexus_agent.core.memory import ProceduralMemory
 from nexus_agent.core.knowledge_graph_engine import KnowledgeGraphEngine, RepoGraph
 from nexus_agent.core.models import (
@@ -84,6 +87,10 @@ class Orchestrator:
         self.tool_registry.register(execute_cli_command)
         self.tool_registry.register(read_file)
         self.tool_registry.register(write_file)
+        # P2.4: file system exploration tools
+        self.tool_registry.register(list_files)
+        self.tool_registry.register(get_file_tree)
+        self.tool_registry.register(search_in_files)
         
         # Initialize Agents
         self.planner = PlannerAgent(self.procedural_memory)

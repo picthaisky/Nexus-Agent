@@ -244,3 +244,117 @@ def write_file(file_path: str, content: str) -> str:
         return f"Successfully wrote to {file_path} ({len(content)} chars)"
     except Exception as exc:
         return f"Error writing file: {exc}"
+
+
+# ── P2.4 File System Context Tools ───────────────────────────────────────────
+# These tools allow the Executor Agent to explore the project workspace without
+# having to know exact file paths upfront — essential for coding tasks.
+
+@tool
+def list_files(directory: str = ".", pattern: str = "*", recursive: bool = False) -> str:
+    """List files in a directory inside the workspace.
+
+    Args:
+        directory: Relative path from NEXUS_REPO_ROOT (use "." for root).
+        pattern:   Glob pattern e.g. "*.py", "*.ts", "src/**/*.tsx".
+        recursive: If True, searches all subdirectories.
+
+    Returns a newline-separated list of matching paths (max 200 entries).
+    """
+    import glob as _glob
+    base = Path(_DEFAULT_CWD) / directory
+    if not base.exists():
+        return f"Error: Directory '{directory}' does not exist under the workspace."
+    try:
+        if recursive:
+            matches = list(base.rglob(pattern))
+        else:
+            matches = list(base.glob(pattern))
+        files = sorted(
+            str(p.relative_to(Path(_DEFAULT_CWD))) for p in matches if p.is_file()
+        )[:200]
+        if not files:
+            return f"(no files matching '{pattern}' in '{directory}')"
+        return "\n".join(files)
+    except Exception as exc:
+        return f"Error listing files: {exc}"
+
+
+@tool
+def get_file_tree(root: str = ".", max_depth: int = 3) -> str:
+    """Return an ASCII directory tree for a path inside the workspace.
+
+    Args:
+        root:      Relative path from NEXUS_REPO_ROOT (use "." for project root).
+        max_depth: How many levels deep to expand (default 3, max 5).
+
+    Useful for understanding project structure before reading/writing files.
+    """
+    max_depth = min(max_depth, 5)
+    base = Path(_DEFAULT_CWD) / root
+    if not base.exists():
+        return f"Error: '{root}' does not exist under the workspace."
+
+    lines: list[str] = [str(base.relative_to(Path(_DEFAULT_CWD)))]
+
+    def _walk(path: Path, prefix: str, depth: int) -> None:
+        if depth > max_depth:
+            return
+        try:
+            entries = sorted(path.iterdir(), key=lambda p: (p.is_file(), p.name))
+        except PermissionError:
+            return
+        for i, entry in enumerate(entries):
+            if entry.name.startswith('.') and entry.name not in {'.env', '.gitignore'}:
+                continue  # skip hidden files (except common config)
+            connector = "└── " if i == len(entries) - 1 else "├── "
+            lines.append(f"{prefix}{connector}{entry.name}")
+            if entry.is_dir() and depth < max_depth:
+                extension = "    " if i == len(entries) - 1 else "│   "
+                _walk(entry, prefix + extension, depth + 1)
+
+    _walk(base, "", 1)
+    if len(lines) > 150:
+        lines = lines[:150]
+        lines.append("... (truncated)")
+    return "\n".join(lines)
+
+
+@tool
+def search_in_files(pattern: str, directory: str = ".", file_glob: str = "*.py") -> str:
+    """Search for a text pattern inside files in the workspace (like grep).
+
+    Args:
+        pattern:   Text or regex pattern to search for.
+        directory: Directory to search (relative to NEXUS_REPO_ROOT).
+        file_glob: Glob to filter files e.g. "*.py", "*.ts", "**/*.tsx".
+
+    Returns matching lines with file:line format (max 50 results).
+    """
+    import re as _re
+    base = Path(_DEFAULT_CWD) / directory
+    if not base.exists():
+        return f"Error: '{directory}' does not exist under the workspace."
+
+    results: list[str] = []
+    try:
+        compiled = _re.compile(pattern, _re.IGNORECASE)
+    except _re.error as exc:
+        return f"Error: Invalid regex pattern — {exc}"
+
+    for fpath in base.rglob(file_glob):
+        if not fpath.is_file():
+            continue
+        try:
+            text = fpath.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            continue
+        for lineno, line in enumerate(text.splitlines(), 1):
+            if compiled.search(line):
+                rel = str(fpath.relative_to(Path(_DEFAULT_CWD)))
+                results.append(f"{rel}:{lineno}: {line.strip()[:120]}")
+                if len(results) >= 50:
+                    results.append("... (more results truncated)")
+                    return "\n".join(results)
+
+    return "\n".join(results) if results else f"(no matches for '{pattern}' in '{directory}')"

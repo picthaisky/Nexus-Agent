@@ -4,6 +4,7 @@ import { ExpFx } from "../hooks/useAgentSocket";
 import { PhaserGame, IRefPhaserGame } from "../game/PhaserGame";
 import { EventBus } from "../game/EventBus";
 import { SCENE_DEFAULTS, type SceneGenerateResponse } from "../game/sceneConfig";
+import { useTaskSocket } from "../hooks/useTaskSocket";
 
 interface IsometricRoomProps {
   agents: Record<string, AgentRuntimeState>;
@@ -92,6 +93,50 @@ export function IsometricRoom({ agents, expEffects }: IsometricRoomProps) {
   const phaserRef = useRef<IRefPhaserGame | null>(null);
   const [proximityAgentId, setProximityAgentId] = useState<string | null>(null);
   const [selectedAgent, setSelectedAgent] = useState<AgentRuntimeState | null>(null);
+
+  // Track the latest running task — subscribe via EventBus so Dashboard can push task_id
+  const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
+  const { steps, status, thoughts } = useTaskSocket(activeTaskId);
+
+  // LangGraph node → isometric office agent_id mapping
+  const NODE_TO_AGENT: Record<string, string> = {
+    planner:   "planner",
+    executor:  "developer",
+    validator: "validator",
+    learner:   "optimizer",
+  };
+
+  // Listen for task-started from Dashboard/CommandInput
+  useEffect(() => {
+    const onTaskStarted = (taskId: string) => setActiveTaskId(taskId);
+    EventBus.on("task-started", onTaskStarted);
+    return () => { EventBus.removeListener("task-started", onTaskStarted); };
+  }, []);
+
+  // Forward task step progress into the Phaser scene
+  useEffect(() => {
+    for (const step of steps) {
+      const agentId = NODE_TO_AGENT[step.step] ?? step.step;
+      EventBus.emit("task-step", { agentId, step: step.stepIndex, total: step.totalSteps });
+    }
+  }, [steps]);
+
+  // Clear progress bars when task finishes
+  useEffect(() => {
+    if (status === "completed" || status === "failed") {
+      for (const agentId of Object.values(NODE_TO_AGENT)) {
+        EventBus.emit("task-done", agentId);
+      }
+    }
+  }, [status]);
+
+  // Forward agent thoughts as cloud bubbles in the Phaser scene
+  useEffect(() => {
+    const latest = thoughts[thoughts.length - 1];
+    if (!latest) return;
+    const agentId = NODE_TO_AGENT[latest.agent] ?? latest.agent;
+    EventBus.emit("agent-thought", { agentId, thought: latest.thought });
+  }, [thoughts]);
 
   // Scene generation state
   const [genState, setGenState] = useState<"idle" | "loading" | "done" | "error">("idle");
