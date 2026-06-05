@@ -73,7 +73,7 @@ jobs:
     if: github.actor != 'dependabot[bot]'
     steps:
       - name: 📥 Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: 🐍 Setup Python ${{ env.PYTHON_VERSION }}
         uses: actions/setup-python@v6
@@ -125,7 +125,7 @@ jobs:
         working-directory: frontend
     steps:
       - name: 📥 Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: 🟢 Setup Node ${{ env.NODE_VERSION }}
         uses: actions/setup-node@v4
@@ -163,7 +163,7 @@ jobs:
       image_digest: ${{ steps.build-push.outputs.digest }}
     steps:
       - name: 📥 Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: 🔧 Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -226,7 +226,7 @@ jobs:
       image_digest: ${{ steps.build-push.outputs.digest }}
     steps:
       - name: 📥 Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: 🔧 Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
