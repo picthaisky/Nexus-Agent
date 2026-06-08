@@ -27,7 +27,7 @@ redis>=5.0
 
 # ── Observability ───────────────────────────────────────────────────────────
 prometheus-client>=0.20.0
-sentry-sdk[fastapi]>=2.7.0
+sentry-sdk[fastapi]>=2.61.1
 
 # ── Optional multi-provider LLM clients (install only if you use the provider) ──
 anthropic>=0.30.0
