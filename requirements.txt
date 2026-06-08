@@ -43,7 +43,7 @@ aiofiles>=23.0
 # LINE Notify uses httpx (already listed above)
 
 # ── File parsing ─────────────────────────────────────────────────────────────
-python-multipart>=0.0.9    # required for FastAPI file uploads
+python-multipart>=0.0.32    # required for FastAPI file uploads
 Jinja2>=3.1.0              # email templates
 
 # ── Data export ─────────────────────────────────────────────────────────────
